@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>FNARTS.Game.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/FNARTS.Core/FNARTS.Core.csproj" />
+    <ProjectReference Include="../../../FNA/FNA.Core.csproj" />
+    <Compile Include="../../../FNA_Test/Common/TestHarness.cs" />
+    <Compile Include="../../src/FNARTS.Game/Camera/Camera2D.cs" />
+    <Compile Include="../../src/FNARTS.Game/Util/VectorConvert.cs" />
+    <Compile Include="../../src/FNARTS.Game/Input/InputAction.cs" />
+  </ItemGroup>
+</Project>

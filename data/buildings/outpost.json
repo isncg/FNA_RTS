@@ -1,0 +1,9 @@
+{
+  "id": "place_2x2x1",
+  "name": "Outpost",
+  "sizeX": 2,
+  "sizeY": 2,
+  "height": 1,
+  "textureId": "gen_2_2_1",
+  "producesUnitIds": []
+}

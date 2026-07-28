@@ -1,0 +1,9 @@
+{
+  "id": "place_4x4x2",
+  "name": "Fortress",
+  "sizeX": 4,
+  "sizeY": 4,
+  "height": 2,
+  "textureId": "gen_4_4_2",
+  "producesUnitIds": ["soldier", "tank"]
+}

@@ -1,0 +1,9 @@
+{
+  "id": "place_3x3x1",
+  "name": "Hall",
+  "sizeX": 3,
+  "sizeY": 3,
+  "height": 1,
+  "textureId": "gen_3_3_1",
+  "producesUnitIds": []
+}

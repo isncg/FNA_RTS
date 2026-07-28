@@ -1,0 +1,7 @@
+{
+  "id": "tank",
+  "name": "Tank",
+  "moveSpeed": 70.0,
+  "buildTime": 15.0,
+  "textureId": "tank"
+}

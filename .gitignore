@@ -1,0 +1,29 @@
+# .NET build outputs
+bin/
+obj/
+
+# Native library symlinks (libFNA3D.so)
+*.so
+*.so.*
+
+# Python cache
+__pycache__/
+
+# IDE / editor
+.vscode/
+.idea/
+.vs/
+*.suo
+*.user
+*.userprefs
+
+# Claude Code local config
+.claude/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Misc
+*.pidb
+**/imgui.ini

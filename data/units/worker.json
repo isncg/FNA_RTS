@@ -1,0 +1,7 @@
+{
+  "id": "worker",
+  "name": "Worker",
+  "moveSpeed": 120.0,
+  "buildTime": 5.0,
+  "textureId": "worker"
+}

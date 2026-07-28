@@ -1,0 +1,16 @@
+{
+  "actions": {
+    "cameraPanUp": ["KeyW", "ArrowUp"],
+    "cameraPanDown": ["KeyS", "ArrowDown"],
+    "cameraPanLeft": ["KeyA", "ArrowLeft"],
+    "cameraPanRight": ["KeyD", "ArrowRight"],
+    "cameraZoomIn": ["ScrollUp"],
+    "cameraZoomOut": ["ScrollDown"],
+    "select": ["MouseLeft"],
+    "command": ["MouseRight"],
+    "shiftModifier": ["LeftShift", "RightShift"],
+    "ctrlModifier": ["LeftControl", "RightControl"],
+    "togglePause": ["Escape"],
+    "cancel": ["Escape"]
+  }
+}

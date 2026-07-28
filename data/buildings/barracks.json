@@ -1,0 +1,9 @@
+{
+  "id": "place_3x2x2",
+  "name": "Barracks",
+  "sizeX": 3,
+  "sizeY": 2,
+  "height": 2,
+  "textureId": "gen_3_2_2",
+  "producesUnitIds": ["worker", "soldier"]
+}

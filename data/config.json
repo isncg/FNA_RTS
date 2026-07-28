@@ -1,0 +1,10 @@
+{
+  "placementOrder": [
+    "place_1x1x1",
+    "place_2x2x1",
+    "place_3x2x2",
+    "place_2x3x2",
+    "place_3x3x1",
+    "place_4x4x2"
+  ]
+}

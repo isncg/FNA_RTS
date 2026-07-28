@@ -1,0 +1,9 @@
+{
+  "id": "place_1x1x1",
+  "name": "Shed",
+  "sizeX": 1,
+  "sizeY": 1,
+  "height": 1,
+  "textureId": "gen_1_1_1",
+  "producesUnitIds": []
+}

@@ -1,0 +1,9 @@
+{
+  "id": "place_2x3x2",
+  "name": "Workshop",
+  "sizeX": 2,
+  "sizeY": 3,
+  "height": 2,
+  "textureId": "gen_2_3_2",
+  "producesUnitIds": ["tank"]
+}

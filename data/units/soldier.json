@@ -1,0 +1,7 @@
+{
+  "id": "soldier",
+  "name": "Soldier",
+  "moveSpeed": 90.0,
+  "buildTime": 8.0,
+  "textureId": "infantry"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "base",
+  "name": "Command Center",
+  "sizeX": 3,
+  "sizeY": 3,
+  "height": 2,
+  "textureId": "base",
+  "producesUnitIds": ["worker"]
+}
