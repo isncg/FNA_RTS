@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Numerics;
 using Xunit;
 
@@ -93,6 +94,71 @@ namespace FNARTS.Core.Tests.Entity
             // Direction should be (100,100)/~141.4 normalized * 100
             Assert.Equal(70.71f, unit.WorldPosition.X, 1);
             Assert.Equal(70.71f, unit.WorldPosition.Y, 1);
+        }
+
+        // ---- Phase 2: waypoint following ----
+
+        [Fact]
+        public void Update_WithPath_FollowsWaypoints()
+        {
+            var def = new UnitDef { MoveSpeed = 40f };  // slow enough to not overshoot
+            // Place unit at world center of grid (0,0)
+            var origin = CoordUtil.IsoToWorldCenter(new IsoCoord(0, 0));
+            var unit = new Unit(def) { WorldPosition = origin };
+
+            // Waypoints: (3,0) then (6,0) — far enough apart
+            unit.Path = new List<IsoCoord> { new(3, 0), new(6, 0) };
+            unit.PathIndex = 0;
+
+            // First update — unit moves toward waypoint 0 but doesn't reach it
+            unit.Update(0.1f); // moves only 4px at 40px/s
+            Assert.Equal(0, unit.PathIndex); // still heading to first waypoint
+            Assert.NotEqual(origin, unit.WorldPosition);
+
+            // Move far enough to reach first waypoint
+            var wp0Center = CoordUtil.IsoToWorldCenter(new IsoCoord(3, 0));
+            var toWp0 = wp0Center - unit.WorldPosition;
+            float distToWp0 = toWp0.Length();
+            float timeToReach = distToWp0 / def.MoveSpeed + 0.02f;
+            unit.Update(timeToReach);
+            Assert.Equal(1, unit.PathIndex); // advanced to second waypoint
+        }
+
+        [Fact]
+        public void Update_ArrivesAtFinalWaypoint_Stops()
+        {
+            var def = new UnitDef { MoveSpeed = 200f };
+            var origin = CoordUtil.IsoToWorldCenter(new IsoCoord(0, 0));
+            var unit = new Unit(def) { WorldPosition = origin };
+
+            unit.Path = new List<IsoCoord> { new(1, 0) };
+            unit.PathIndex = 0;
+
+            // Move enough to reach the only waypoint
+            unit.Update(1f); // 200px at 200px/s — more than enough for 1 tile (32px half-diag)
+            Assert.Equal(1, unit.PathIndex); // path exhausted (PathIndex == Path.Count)
+            Assert.Null(unit.MoveTarget);
+            Assert.False(unit.IsMoving);
+        }
+
+        [Fact]
+        public void ClearOrders_ResetsAllState()
+        {
+            var def = new UnitDef();
+            var unit = new Unit(def)
+            {
+                MoveTarget = new Vector2(100, 100),
+                Path = new List<IsoCoord> { new(1, 0), new(2, 0) },
+                PathIndex = 1,
+            };
+            unit.AttackTargetId = 42;
+
+            unit.ClearOrders();
+
+            Assert.Null(unit.MoveTarget);
+            Assert.Null(unit.Path);
+            Assert.Equal(0, unit.PathIndex);
+            Assert.Null(unit.AttackTargetId);
         }
     }
 }

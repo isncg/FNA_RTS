@@ -86,23 +86,25 @@ namespace FNARTS.Core
                 placementOrigin, definition.SizeX, definition.SizeY);
         }
 
-        /// <summary>Return all grid coordinates occupied by this building.</summary>
+        /// <summary>Return all grid coordinates occupied by this building.
+        /// Includes one extra row south (gy-1) for the south-wall footprint.</summary>
         public IsoCoord[] GetOccupiedTiles()
         {
-            var tiles = new IsoCoord[SizeX * SizeY];
+            var tiles = new IsoCoord[SizeX * (SizeY + 1)];
             int i = 0;
             for (int x = 0; x < SizeX; x++)
-            for (int y = 0; y < SizeY; y++)
+            for (int y = -1; y < SizeY; y++)
                 tiles[i++] = new IsoCoord(PlacementOrigin.X + x, PlacementOrigin.Y + y);
             return tiles;
         }
 
-        /// <summary>Check if building occupies a given tile.</summary>
+        /// <summary>Check if building occupies a given tile.
+        /// Extends one tile south (gy-1) for the south-wall visual footprint.</summary>
         public bool OccupiesTile(IsoCoord coord)
         {
             return coord.X >= PlacementOrigin.X &&
                    coord.X < PlacementOrigin.X + SizeX &&
-                   coord.Y >= PlacementOrigin.Y &&
+                   coord.Y >= PlacementOrigin.Y - 1 &&   // south wall
                    coord.Y < PlacementOrigin.Y + SizeY;
         }
     }

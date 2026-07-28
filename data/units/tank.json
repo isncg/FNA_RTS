@@ -3,5 +3,11 @@
   "name": "Tank",
   "moveSpeed": 70.0,
   "buildTime": 15.0,
-  "textureId": "tank"
+  "textureId": "tank",
+  "hp": 200,
+  "attackDamage": 35,
+  "attackRange": 128.0,
+  "attackCooldown": 2.0,
+  "armor": 8,
+  "visionRange": 4
 }

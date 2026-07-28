@@ -5,5 +5,8 @@
   "sizeY": 3,
   "height": 1,
   "textureId": "gen_3_3_1",
-  "producesUnitIds": []
+  "producesUnitIds": [],
+  "hp": 600,
+  "armor": 6,
+  "visionRange": 2
 }

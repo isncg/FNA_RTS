@@ -82,5 +82,20 @@ namespace FNARTS.Core
             float off_wy = (sizeX + sizeY) * HALF_TILE_H / 2f;
             return new Vector2(tileSW_wx - off_wx, tileSW_wy - off_wy);
         }
+
+        /// <summary>
+        /// World-space visual centre of the tile diamond — the point where a
+        /// 1×1 building sits.  Equals IsoToWorldCenter + (32, 32).
+        /// Note: WorldToIso of this point returns (gx, gy-1), i.e. one tile
+        /// south, because the diamond centre sits on the tile's southern edge
+        /// in grid space.  That is harmless for the final idle position; the
+        /// pathfinder will use this position as the start for the next move
+        /// and route correctly from there.
+        /// </summary>
+        public static Vector2 IsoToVisualCenter(IsoCoord coord)
+        {
+            return IsoToWorldCenter(coord) + new Vector2(
+                TILE_WIDTH / 2f, TILE_HEIGHT);
+        }
     }
 }

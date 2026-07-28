@@ -32,14 +32,16 @@ namespace FNARTS.Core.Tests.Entity
         }
 
         [Fact]
-        public void GetOccupiedTiles_1x1_ReturnsSingleTile()
+        public void GetOccupiedTiles_1x1_ReturnsTopAndSouthRow()
         {
             var def = new BuildingDef { SizeX = 1, SizeY = 1 };
             var building = new Building(def, new IsoCoord(3, 4));
             var tiles = building.GetOccupiedTiles();
 
-            Assert.Single(tiles);
-            Assert.Equal(new IsoCoord(3, 4), tiles[0]);
+            // 1×1 building occupies 2 tiles: top face + south-wall row
+            Assert.Equal(2, tiles.Length);
+            Assert.Contains(new IsoCoord(3, 4), tiles);  // top face
+            Assert.Contains(new IsoCoord(3, 3), tiles);  // south wall
         }
 
         [Fact]
@@ -49,13 +51,19 @@ namespace FNARTS.Core.Tests.Entity
             var building = new Building(def, new IsoCoord(5, 5));
             var tiles = building.GetOccupiedTiles();
 
-            Assert.Equal(6, tiles.Length);
+            // 3×2 building occupies 3×(2+1) = 9 tiles (top face + south-wall row)
+            Assert.Equal(9, tiles.Length);
+            // Top face (gy 5..6)
             Assert.Contains(new IsoCoord(5, 5), tiles);
             Assert.Contains(new IsoCoord(6, 5), tiles);
             Assert.Contains(new IsoCoord(7, 5), tiles);
             Assert.Contains(new IsoCoord(5, 6), tiles);
             Assert.Contains(new IsoCoord(6, 6), tiles);
             Assert.Contains(new IsoCoord(7, 6), tiles);
+            // South-wall row (gy=4)
+            Assert.Contains(new IsoCoord(5, 4), tiles);
+            Assert.Contains(new IsoCoord(6, 4), tiles);
+            Assert.Contains(new IsoCoord(7, 4), tiles);
         }
 
         [Fact]
@@ -64,10 +72,14 @@ namespace FNARTS.Core.Tests.Entity
             var def = new BuildingDef { SizeX = 2, SizeY = 2 };
             var building = new Building(def, new IsoCoord(3, 3));
 
+            // Top face
             Assert.True(building.OccupiesTile(new IsoCoord(3, 3)));
             Assert.True(building.OccupiesTile(new IsoCoord(4, 3)));
             Assert.True(building.OccupiesTile(new IsoCoord(3, 4)));
             Assert.True(building.OccupiesTile(new IsoCoord(4, 4)));
+            // South-wall row (gy-1)
+            Assert.True(building.OccupiesTile(new IsoCoord(3, 2)));
+            Assert.True(building.OccupiesTile(new IsoCoord(4, 2)));
         }
 
         [Fact]
@@ -76,10 +88,11 @@ namespace FNARTS.Core.Tests.Entity
             var def = new BuildingDef { SizeX = 2, SizeY = 2 };
             var building = new Building(def, new IsoCoord(3, 3));
 
-            Assert.False(building.OccupiesTile(new IsoCoord(2, 3)));
-            Assert.False(building.OccupiesTile(new IsoCoord(5, 3)));
-            Assert.False(building.OccupiesTile(new IsoCoord(3, 5)));
-            Assert.False(building.OccupiesTile(new IsoCoord(10, 10)));
+            Assert.False(building.OccupiesTile(new IsoCoord(2, 3)));   // west
+            Assert.False(building.OccupiesTile(new IsoCoord(5, 3)));   // east
+            Assert.False(building.OccupiesTile(new IsoCoord(3, 5)));   // north
+            Assert.False(building.OccupiesTile(new IsoCoord(3, 1)));   // far south
+            Assert.False(building.OccupiesTile(new IsoCoord(10, 10))); // distant
         }
     }
 }

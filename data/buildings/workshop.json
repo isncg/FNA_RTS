@@ -5,5 +5,8 @@
   "sizeY": 3,
   "height": 2,
   "textureId": "gen_2_3_2",
-  "producesUnitIds": ["tank"]
+  "producesUnitIds": ["tank"],
+  "hp": 550,
+  "armor": 5,
+  "visionRange": 3
 }

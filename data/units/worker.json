@@ -3,5 +3,11 @@
   "name": "Worker",
   "moveSpeed": 120.0,
   "buildTime": 5.0,
-  "textureId": "worker"
+  "textureId": "worker",
+  "hp": 60,
+  "attackDamage": 3,
+  "attackRange": 48.0,
+  "attackCooldown": 1.5,
+  "armor": 0,
+  "visionRange": 4
 }

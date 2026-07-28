@@ -3,5 +3,11 @@
   "name": "Soldier",
   "moveSpeed": 90.0,
   "buildTime": 8.0,
-  "textureId": "infantry"
+  "textureId": "infantry",
+  "hp": 100,
+  "attackDamage": 15,
+  "attackRange": 96.0,
+  "attackCooldown": 1.0,
+  "armor": 2,
+  "visionRange": 5
 }
