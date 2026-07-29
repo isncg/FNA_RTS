@@ -18,5 +18,8 @@ namespace FNARTS.Core
         public int HP { get; set; } = 300;
         public int Armor { get; set; } = 3;
         public int VisionRange { get; set; } = 2;      // Phase 3 fog of war
+
+        // Phase 2.5 economy
+        public int CostCredits { get; set; } = 0;
     }
 }

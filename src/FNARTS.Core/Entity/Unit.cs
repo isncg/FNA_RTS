@@ -26,6 +26,10 @@ namespace FNARTS.Core
         public float AttackCooldownTimer { get; set; }
         public uint? AttackTargetId { get; set; }
         public int Armor => Definition.Armor;
+        public int HealAmount => Definition.HealAmount;
+        public float HealRange => Definition.HealRange;
+        public bool IsAircraft => Definition.IsAircraft;
+        public bool CanHitAir => Definition.CanHitAir;
 
         // ---- stuck detection ----
         /// <summary>Seconds spent without meaningful progress while moving.</summary>

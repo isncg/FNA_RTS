@@ -1,0 +1,15 @@
+{
+  "id": "scout",
+  "name": "Scout",
+  "moveSpeed": 160.0,
+  "buildTime": 20.0,
+  "textureId": "scout",
+  "hp": 50,
+  "attackDamage": 0,
+  "attackRange": 0.0,
+  "attackCooldown": 0.0,
+  "armor": 0,
+  "visionRange": 10,
+  "costCredits": 250,
+  "isAircraft": true
+}

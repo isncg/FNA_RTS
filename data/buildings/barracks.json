@@ -5,8 +5,9 @@
   "sizeY": 2,
   "height": 2,
   "textureId": "gen_3_2_2",
-  "producesUnitIds": ["worker", "soldier"],
+  "producesUnitIds": ["worker", "soldier", "archer", "medic"],
   "hp": 500,
   "armor": 5,
-  "visionRange": 3
+  "visionRange": 3,
+  "costCredits": 250
 }

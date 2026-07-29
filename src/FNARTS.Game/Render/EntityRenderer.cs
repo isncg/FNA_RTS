@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using FNARTS.Core;
+using FNARTS.Core.Fog;
 
 namespace FNARTS.Game
 {
@@ -18,13 +19,15 @@ namespace FNARTS.Game
             _assets = assets;
         }
 
+        /// <param name="fog">Optional fog-of-war — entities on Unexplored tiles
+        /// are hidden, entities on Explored tiles are dimmed.</param>
         public void Draw(SpriteBatch sb, Camera2D camera, EntityManager entities,
-            SelectionSystem selection)
+            SelectionSystem selection, FogOfWar fog = null)
         {
             // Normalisation divisor — max(gx+gy) for the 51×51 map.
             const float maxSum = 102f;
 
-            var visible = new List<(Entity entity, float depth)>();
+            var visible = new List<(Entity entity, float depth, bool dimmed)>();
 
             foreach (var e in entities.AllEntities)
             {
@@ -35,16 +38,22 @@ namespace FNARTS.Game
                     screenPos.Y < -100 || screenPos.Y > 2000)
                     continue;
 
+                // Fog-of-war filtering
+                bool dimmed = false;
+                if (fog != null)
+                {
+                    var gridPos = CoordUtil.WorldToIso(e.WorldPosition);
+                    var fogState = fog[gridPos];
+                    if (fogState == FogCell.Unexplored)
+                        continue;           // hidden — skip entirely
+                    if (fogState == FogCell.Explored)
+                        dimmed = true;      // visible but dimmed
+                }
+
                 float depth;
                 if (e is Building b)
                 {
                     // Use the *centre* of the footprint for depth.
-                    // A building occupies a range of depths (SW=nearest →
-                    // NE=farthest) but must be drawn as a single sprite.
-                    // The centre is the best compromise:
-                    //   - Units on the south/west (near) side sort in front  ✓
-                    //   - Units on the north/east (far) side sort behind   ✓
-                    //   - Building-vs-building comparisons are fair         ✓
                     float centerGx = b.PlacementOrigin.X + b.SizeX * 0.5f;
                     float centerGy = b.PlacementOrigin.Y + b.SizeY * 0.5f;
                     depth = MathHelper.Clamp((centerGx + centerGy) / maxSum, 0, 1);
@@ -56,7 +65,7 @@ namespace FNARTS.Game
                         (gridFloat.X + gridFloat.Y) / maxSum, 0, 1);
                 }
 
-                visible.Add((e, depth));
+                visible.Add((e, depth, dimmed));
             }
 
             // Sort far-to-near
@@ -67,7 +76,7 @@ namespace FNARTS.Game
                 RasterizerState.CullCounterClockwise, null,
                 camera.ViewMatrix);
 
-            foreach (var (entity, depth) in visible)
+            foreach (var (entity, depth, dimmed) in visible)
             {
                 Texture2D tex = entity switch
                 {
@@ -78,8 +87,24 @@ namespace FNARTS.Game
 
                 Vector2 pos = entity.WorldPosition.ToXna();
                 Vector2 origin = new Vector2(tex.Width / 2f, tex.Height / 2f);
-                Color tint = selection.SelectedEntityIds.Contains(entity.Id)
-                    ? new Color(150, 255, 150) : Color.White;
+                bool isSelected = selection.SelectedEntityIds.Contains(entity.Id);
+
+                // Selection highlight ring — drawn below the entity sprite.
+                // Skip highlight for dimmed (out-of-vision) entities.
+                if (isSelected && !dimmed)
+                {
+                    Texture2D hlTex = _assets.SelectionHighlight;
+                    Vector2 hlOrigin = new Vector2(hlTex.Width / 2f, hlTex.Height / 2f);
+                    sb.Draw(hlTex, pos, null, Color.White, 0f, hlOrigin, 1f,
+                        SpriteEffects.None, depth);
+                }
+
+                // Tint: green for selected, grey for fog-dimmed.
+                Color tint = Color.White;
+                if (dimmed)
+                    tint = new Color(80, 80, 80, 180);
+                else if (isSelected)
+                    tint = new Color(180, 255, 180);
 
                 sb.Draw(tex, pos, null, tint, 0f, origin, 1f,
                     SpriteEffects.None, depth);

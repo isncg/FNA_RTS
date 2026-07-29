@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using FNARTS.Core.Resource;
 
 namespace FNARTS.Core.Production
 {
@@ -56,6 +57,26 @@ namespace FNARTS.Core.Production
 
             building.ProductionQueue.Enqueue(
                 new ProductionItem(unitDefId, buildTime));
+            return true;
+        }
+
+        /// <summary>
+        /// Enqueue with credit cost.  Deducts costCredits from the given
+        /// faction before enqueuing.  Returns false if the building cannot
+        /// produce the unit OR the faction has insufficient credits.
+        /// </summary>
+        public bool Enqueue(Building building, string unitDefId, float buildTime,
+            int costCredits, ResourceManager resources, int playerFaction)
+        {
+            if (!resources.TrySpend(playerFaction, costCredits))
+                return false;
+
+            if (!Enqueue(building, unitDefId, buildTime))
+            {
+                // Refund if production is invalid.
+                resources.AddCredits(playerFaction, costCredits);
+                return false;
+            }
             return true;
         }
 

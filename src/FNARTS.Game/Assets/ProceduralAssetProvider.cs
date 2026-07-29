@@ -47,9 +47,12 @@ namespace FNARTS.Game
             if (_unitCache.TryGetValue(unitDefId, out var cached)) return cached;
             var tex = GenCircleTex(32, unitDefId switch
             {
-                "worker" => new Color(200, 200, 100),
-                "infantry" => new Color(100, 180, 255),
-                "tank" => new Color(255, 120, 80),
+                "worker"  => new Color(200, 200, 100),   // yellow
+                "soldier" => new Color(100, 180, 255),   // blue
+                "tank"    => new Color(255, 120, 80),    // orange
+                "archer"  => new Color(180, 100, 255),   // purple
+                "medic"   => new Color(255, 255, 255),   // white
+                "scout"   => new Color(100, 255, 255),   // cyan
                 _ => Color.Gray
             });
             _unitCache[unitDefId] = tex;

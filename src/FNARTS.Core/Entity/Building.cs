@@ -78,12 +78,18 @@ namespace FNARTS.Core
             return false;
         }
 
+        // ---- combat (Phase 2) ----
+        public int CurrentHP { get; set; }
+        public int MaxHP => Definition.HP;
+        public int Armor => Definition.Armor;
+
         public Building(BuildingDef definition, IsoCoord placementOrigin)
         {
             Definition = definition;
             PlacementOrigin = placementOrigin;
             WorldPosition = CoordUtil.BuildingWorldOrigin(
                 placementOrigin, definition.SizeX, definition.SizeY);
+            CurrentHP = definition.HP;
         }
 
         /// <summary>Return all grid coordinates occupied by this building.

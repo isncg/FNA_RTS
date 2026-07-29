@@ -10,27 +10,50 @@ namespace FNARTS.Core
     /// </summary>
     public class CommandSystem
     {
+        private int _playerFaction;
+
+        /// <summary>Player faction index for enemy/friendly detection.</summary>
+        public int PlayerFaction
+        {
+            get => _playerFaction;
+            set => _playerFaction = value;
+        }
+
         /// <summary>
-        /// Generate a move command from a right-click.
-        /// If clicking on a unit/building, move to its position.
-        /// Otherwise move to the clicked world position.
+        /// Process a right-click into a command.
+        /// Right-click enemy → AttackCommand, friendly/ground → MoveCommand.
         /// </summary>
-        public MoveCommand ProcessRightClick(Vector2 worldPos,
+        public Command? ProcessRightClick(Vector2 worldPos,
             EntityManager entities, SelectionSystem selection)
         {
             // Check if clicking on an entity
             var clicked = entities.QueryPoint(worldPos);
-            Vector2 target = clicked != null ? clicked.WorldPosition : worldPos;
 
-            return new MoveCommand(target);
+            if (clicked != null && clicked.IsAlive)
+            {
+                if (clicked.Faction != _playerFaction)
+                {
+                    // Enemy → attack
+                    return new AttackCommand(clicked.Id, clicked.WorldPosition);
+                }
+                else
+                {
+                    // Friendly → move to its position
+                    return new MoveCommand(clicked.WorldPosition);
+                }
+            }
+            else
+            {
+                // Empty ground → move
+                return new MoveCommand(worldPos);
+            }
         }
 
         /// <summary>Execute pending commands. Called once per frame.</summary>
         public void ExecuteCommands(EntityManager entities, TileMap map)
         {
-            // Commands are executed immediately in Phase 1 (no command queue)
-            // The command is applied directly to selected units in ProcessRightClick.
-            // This method exists for Phase 2 expansion (build queues, attack commands).
+            // Commands are executed immediately in Phase 1-2 (no command queue).
+            // This method exists for Phase 3 expansion (command queues, build queues).
         }
     }
 }

@@ -6,5 +6,6 @@
     "place_2x3x2",
     "place_3x3x1",
     "place_4x4x2"
-  ]
+  ],
+  "startingCredits": 2000
 }

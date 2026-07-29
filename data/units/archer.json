@@ -1,0 +1,15 @@
+{
+  "id": "archer",
+  "name": "Archer",
+  "moveSpeed": 80.0,
+  "buildTime": 10.0,
+  "textureId": "archer",
+  "hp": 60,
+  "attackDamage": 25,
+  "attackRange": 160.0,
+  "attackCooldown": 1.5,
+  "armor": 1,
+  "visionRange": 6,
+  "costCredits": 150,
+  "canHitAir": true
+}

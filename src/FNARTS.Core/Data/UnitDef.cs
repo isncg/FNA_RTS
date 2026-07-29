@@ -16,5 +16,14 @@ namespace FNARTS.Core
         public float AttackCooldown { get; set; } = 1.0f;
         public int Armor { get; set; } = 0;
         public int VisionRange { get; set; } = 4;     // Phase 3 fog of war
+
+        // Phase 2.5 economy
+        public int CostCredits { get; set; } = 0;
+
+        // Phase 2.5 new unit types
+        public int HealAmount { get; set; } = 0;              // >0 = this unit is a healer
+        public float HealRange { get; set; } = 0f;
+        public bool IsAircraft { get; set; } = false;
+        public bool CanHitAir { get; set; } = false;
     }
 }

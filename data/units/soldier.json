@@ -9,5 +9,6 @@
   "attackRange": 96.0,
   "attackCooldown": 1.0,
   "armor": 2,
-  "visionRange": 5
+  "visionRange": 5,
+  "costCredits": 100
 }

@@ -15,6 +15,9 @@ namespace FNARTS.Core.Config
         /// <summary>Building IDs available in placement mode, in display order.</summary>
         public List<string> PlacementOrder { get; } = new();
 
+        // Phase 2.5 economy
+        public int StartingCredits { get; set; } = 500;
+
         public UnitDef GetUnit(string id) =>
             UnitDefs.TryGetValue(id, out var u) ? u : null;
 
@@ -97,6 +100,9 @@ namespace FNARTS.Core.Config
                         foreach (var item in placementEl.EnumerateArray())
                             config.PlacementOrder.Add(item.GetString()!);
                     }
+                    if (doc.RootElement.TryGetProperty("startingCredits", out var scEl)
+                        && scEl.TryGetInt32(out var sc))
+                        config.StartingCredits = sc;
                 }
                 catch (Exception ex)
                 {

@@ -101,6 +101,33 @@ namespace FNARTS.Core
             list.Add(entity);
         }
 
+        /// <summary>Get all alive entities belonging to a faction.</summary>
+        public IEnumerable<Entity> GetFactionEntities(int faction)
+        {
+            return _allEntities.Where(e => e.IsAlive && e.Faction == faction);
+        }
+
+        /// <summary>Get all alive entities NOT belonging to a faction (enemies).</summary>
+        public IEnumerable<Entity> GetEnemyEntities(int faction)
+        {
+            return _allEntities.Where(e => e.IsAlive && e.Faction != faction);
+        }
+
+        /// <summary>
+        /// Remove all dead entities from the manager (index + flat list).
+        /// Call after processing deaths (e.g. in CombatSystem's onDeath callback).
+        /// </summary>
+        public void RemoveDead()
+        {
+            var dead = _allEntities.Where(e => !e.IsAlive).ToList();
+            foreach (var e in dead)
+            {
+                UnindexEntity(e);
+                _entities.Remove(e.Id);
+                _allEntities.Remove(e);
+            }
+        }
+
         private void UnindexEntity(Entity entity)
         {
             var coord = CoordUtil.WorldToIso(entity.WorldPosition);

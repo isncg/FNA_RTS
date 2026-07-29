@@ -8,5 +8,6 @@
   "producesUnitIds": [],
   "hp": 400,
   "armor": 3,
-  "visionRange": 2
+  "visionRange": 2,
+  "costCredits": 200
 }

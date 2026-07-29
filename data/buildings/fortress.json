@@ -8,5 +8,6 @@
   "producesUnitIds": ["soldier", "tank"],
   "hp": 1500,
   "armor": 12,
-  "visionRange": 4
+  "visionRange": 4,
+  "costCredits": 800
 }

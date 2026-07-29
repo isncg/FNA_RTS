@@ -5,10 +5,13 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using FNARTS.Core;
+using FNARTS.Core.Combat;
 using FNARTS.Core.Config;
+using FNARTS.Core.Fog;
 using FNARTS.Core.Movement;
 using FNARTS.Core.Pathfinding;
 using FNARTS.Core.Production;
+using FNARTS.Core.Resource;
 
 namespace FNARTS.Game
 {
@@ -34,6 +37,7 @@ namespace FNARTS.Game
         private TileRenderer _tileRenderer;
         private EntityRenderer _entityRenderer;
         private SelectionRenderer _selectionRenderer;
+        private HpBarRenderer _hpBarRenderer;
         private CommandPanel _commandPanel;
         private Minimap _minimap;
 
@@ -45,6 +49,12 @@ namespace FNARTS.Game
         private GameConfig _config;
         private ProductionSystem _productionSystem;
         private Pathfinder _pathfinder;
+        private CombatSystem _combatSystem;
+        private FogOfWar _fogOfWar;
+        private FogRenderer _fogRenderer;
+        private ResourceManager _resourceManager;
+        private VictorySystem _victorySystem;
+        private VictoryState _victoryState = VictoryState.Ongoing;
         private readonly HashSet<IsoCoord> _reservedTiles = new();
 
         // Placement mode
@@ -69,7 +79,7 @@ namespace FNARTS.Game
             IsFixedTimeStep = true;
             TargetElapsedTime = TimeSpan.FromSeconds(1.0 / 60.0);
             IsMouseVisible = true;
-            Window.Title = "FNA RTS — Phase 1 MVP";
+            Window.Title = "FNA RTS — Phase 2.5";
         }
 
         protected override void Initialize()
@@ -136,6 +146,19 @@ namespace FNARTS.Game
                     _entities.IsAreaFree(coord, 1, 1) &&
                     !_reservedTiles.Contains(coord),
             };
+
+            // Combat system + enemy/friendly detection
+            _combatSystem = new CombatSystem();
+            _commands.PlayerFaction = 0;
+            _victorySystem = new VictorySystem();
+
+            // Fog of war — disabled for now, code ready for later activation
+            _fogOfWar = new FogOfWar(MAP_SIZE, MAP_SIZE);
+            _fogOfWar.RevealAll();
+
+            // Resource system — starting credits only, no harvesting
+            _resourceManager = new ResourceManager();
+            _resourceManager.SetCredits(0, _config.StartingCredits);
 
             CreateTestEntities();
 
@@ -253,18 +276,51 @@ namespace FNARTS.Game
                 _entities.AddEntity(b);
             }
 
-            // A few workers
+            // A few player workers + a tank (faction 0)
             var workerDef = _config.GetUnit("worker");
-            for (int i = 0; i < 5; i++)
+            for (int i = 0; i < 3; i++)
             {
                 var unit = new Unit(workerDef);
                 unit.WorldPosition = CoordUtil.IsoToWorldCenter(
                     new IsoCoord(S + 3 + i, S + 1));
                 _entities.AddEntity(unit);
             }
+            // Add a tank so combat damage is visible
+            var tankDef = _config.GetUnit("tank");
+            var playerTank = new Unit(tankDef)
+            {
+                WorldPosition = CoordUtil.IsoToWorldCenter(new IsoCoord(S + 7, S + 1))
+            };
+            _entities.AddEntity(playerTank);
+
+            // ── Enemy units (faction 1) for testing combat ──────────
+            var soldierDef = _config.GetUnit("soldier");
+            for (int i = 0; i < 3; i++)
+            {
+                var enemy = new Unit(soldierDef)
+                {
+                    Faction = 1,
+                    WorldPosition = CoordUtil.IsoToWorldCenter(
+                        new IsoCoord(S + 12 + i, S + 5))
+                };
+                _entities.AddEntity(enemy);
+            }
+
+            // Enemy building (faction 1) as a static target
+            var enemyBldDef = new BuildingDef
+            {
+                Id = "enemy_outpost", Name = "Enemy Outpost",
+                SizeX = 2, SizeY = 2, Height = 1, HP = 200, Armor = 2,
+                TextureId = "gen_2_2_1",
+            };
+            var enemyBld = new Building(enemyBldDef, new IsoCoord(S + 16, S + 3))
+            {
+                Faction = 1,
+            };
+            _entities.AddEntity(enemyBld);
 
             GameLogger.Info($"Created {_entities.AllEntities.Count} entities " +
-                $"({specs.Length} buildings, 5 units)");
+                $"({specs.Length + 1} buildings, 5 friendlies + 3 enemies)");
         }
 
         protected override void LoadContent()
@@ -274,6 +330,8 @@ namespace FNARTS.Game
             _tileRenderer = new TileRenderer(_map, _assets);
             _entityRenderer = new EntityRenderer(_assets);
             _selectionRenderer = new SelectionRenderer(_assets);
+            _hpBarRenderer = new HpBarRenderer(_assets);
+            _fogRenderer = new FogRenderer(_assets);
             _commandPanel = new CommandPanel(GraphicsDevice);
             GameLogger.Info("Content loaded");
         }
@@ -395,10 +453,19 @@ namespace FNARTS.Game
 
                 if (_input.LeftClicked && _placementValid)
                 {
-                    var b = new Building(_placementDef, _placementGrid);
-                    _entities.AddEntity(b);
-                    GameLogger.Info($"Placed {_placementDef.Name} at " +
-                        $"({_placementGrid.X},{_placementGrid.Y})");
+                    if (!_resourceManager.TrySpend(0, _placementDef.CostCredits))
+                    {
+                        GameLogger.Info($"Cannot afford {_placementDef.Name} " +
+                            $"({_placementDef.CostCredits} credits)");
+                    }
+                    else
+                    {
+                        var b = new Building(_placementDef, _placementGrid);
+                        _entities.AddEntity(b);
+                        GameLogger.Info($"Placed {_placementDef.Name} at " +
+                            $"({_placementGrid.X},{_placementGrid.Y}) " +
+                            $"({_placementDef.CostCredits} credits)");
+                    }
                     _placementActive = false;
                 }
                 else if (_input.RightClicked || _input.EscapePressed)
@@ -421,7 +488,13 @@ namespace FNARTS.Game
                     // Find the currently selected building to enqueue on
                     var selBld = GetSelectedBuilding();
                     if (selBld != null)
-                        _productionSystem.Enqueue(selBld, unitId, ud.BuildTime);
+                    {
+                        if (_resourceManager.TrySpend(0, ud.CostCredits))
+                            _productionSystem.Enqueue(selBld, unitId, ud.BuildTime);
+                        else
+                            GameLogger.Info($"Cannot afford {ud.Name} " +
+                                $"({ud.CostCredits} credits)");
+                    }
                 }
             }
 
@@ -453,11 +526,12 @@ namespace FNARTS.Game
                 _selection.SelectMultiple(selected, _input.ShiftHeld);
             }
 
-            // Right-click command — A* pathfinding + formation (Phase 2)
+            // Right-click command — A* pathfinding + formation + attack (Phase 2)
             if (_input.RightClicked)
             {
                 var worldPosN = _camera.ScreenToWorld(_input.MouseScreenPos).ToNumerics();
                 var cmd = _commands.ProcessRightClick(worldPosN, _entities, _selection);
+                if (cmd == null) goto skipCommand;
 
                 // Collect selected units
                 var selectedUnits = new System.Collections.Generic.List<Unit>();
@@ -467,16 +541,36 @@ namespace FNARTS.Game
                         selectedUnits.Add(u);
                 }
 
+                // Extract target position and attack info from the concrete type
+                System.Numerics.Vector2 targetPos;
+                uint? attackTargetId = null;
+                if (cmd is AttackCommand atkCmd)
+                {
+                    targetPos = atkCmd.TargetWorldPosition;
+                    attackTargetId = atkCmd.TargetEntityId;
+                }
+                else if (cmd is MoveCommand moveCmd)
+                {
+                    targetPos = moveCmd.TargetWorldPosition;
+                }
+                else
+                {
+                    goto skipCommand;
+                }
+
                 if (selectedUnits.Count == 1)
                 {
                     // Single unit — use click point directly
-                    AssignUnitPath(selectedUnits[0], cmd.TargetWorldPosition);
+                    var unit = selectedUnits[0];
+                    unit.ClearOrders();              // reset old path/attack state first
+                    unit.AttackTargetId = attackTargetId; // set AFTER ClearOrders
+                    AssignUnitPath(unit, targetPos);
                 }
                 else if (selectedUnits.Count > 1)
                 {
                     // ── Multi-unit formation: greedy closest-assignment with
                     //     tile reservation (back-to-front, C&C2 style) ──────
-                    var centerTile = CoordUtil.WorldToIso(cmd.TargetWorldPosition);
+                    var centerTile = CoordUtil.WorldToIso(targetPos);
                     var tiles = FormationPosition.Compute(centerTile, selectedUnits.Count);
 
                     // group centroid in grid coords (for back-to-front ordering)
@@ -519,6 +613,10 @@ namespace FNARTS.Game
 
                         var unit = selectedUnits[bestIdx];
                         assigned[bestIdx] = true;
+
+                        // Set attack target for all units when issuing attack
+                        unit.ClearOrders();              // reset old state first
+                        unit.AttackTargetId = attackTargetId; // set AFTER ClearOrders
 
                         var start = CoordUtil.WorldToIso(unit.WorldPosition);
                         var path = TryFindPath(start, tile);
@@ -576,11 +674,22 @@ namespace FNARTS.Game
 
                     _reservedTiles.Clear();
                 }
+                skipCommand:;
             }
 
             // Pause
             if (_input.EscapePressed)
                 _state = GameState.Paused;
+
+            // Combat system — attack resolution + auto-pursuit
+            _combatSystem.Update(dt, _entities, _pathfinder, OnEntityDeath);
+
+            // Fog of war update — disabled for now (F4 to reveal all)
+            // _fogOfWar.Update(_entities, 0);
+
+            // Victory check — after combat so dead entities are already removed
+            if (_victoryState == VictoryState.Ongoing)
+                _victoryState = _victorySystem.CheckVictory(_entities, 0);
 
             // Production system tick
             _productionSystem.Update(dt, _entities, OnUnitSpawned);
@@ -626,6 +735,11 @@ namespace FNARTS.Game
             // Debug toggle
             if (kb.IsKeyDown(Keys.F3) && _prevKb.IsKeyUp(Keys.F3))
                 _debugOverlay.Enabled = !_debugOverlay.Enabled;
+            if (kb.IsKeyDown(Keys.F4) && _prevKb.IsKeyUp(Keys.F4))
+            {
+                _fogOfWar.RevealAll();
+                GameLogger.Info("Fog of war: reveal all (F4)");
+            }
 
             _prevKb = kb;
         }
@@ -645,6 +759,9 @@ namespace FNARTS.Game
             {
                 _tileRenderer.Draw(_sb, _camera);
 
+                // Fog of war overlay — disabled for now
+                // _fogRenderer.Draw(_sb, _camera, _map, _fogOfWar);
+
                 // Placement tile highlights (green/red diamonds under ghost)
                 if (_placementActive)
                 {
@@ -659,7 +776,10 @@ namespace FNARTS.Game
                     _tileRenderer.DrawHighlights(_sb, _camera, tiles, tint);
                 }
 
-                _entityRenderer.Draw(_sb, _camera, _entities, _selection);
+                _entityRenderer.Draw(_sb, _camera, _entities, _selection, null);  // fog disabled
+
+                // HP bars — drawn after entities so they're always on top
+                _hpBarRenderer.Draw(_sb, _camera, _entities);
 
                 // Placement ghost
                 if (_placementActive)
@@ -690,6 +810,22 @@ namespace FNARTS.Game
                 _debugOverlay.Draw();
             }
 
+            // ── Game-over overlay ────────────────────────────────────
+            if (_victoryState != VictoryState.Ongoing)
+            {
+                _sb.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend);
+                int ovY = _gdm.PreferredBackBufferHeight / 2 - 40;
+                _sb.Draw(_assets.WhitePixel,
+                    new Rectangle(0, ovY, _gdm.PreferredBackBufferWidth, 80),
+                    new Color(0, 0, 0, 180));
+                string msg = _victoryState == VictoryState.PlayerWon
+                    ? "VICTORY!" : "DEFEATED";
+                Color msgColor = _victoryState == VictoryState.PlayerWon
+                    ? new Color(100, 255, 100) : new Color(255, 80, 80);
+                _commandPanel.DrawStringCentered(_sb, msg, ovY + 30, msgColor);
+                _sb.End();
+            }
+
             // ── Command panel (bottom bar) ─────────────────────────
             _minimap.Render(_entities, _selection, _camera);
             _commandPanel.ViewportW = _gdm.PreferredBackBufferWidth;
@@ -700,9 +836,11 @@ namespace FNARTS.Game
             _commandPanel.PlacementName = _placementDef?.Name ?? "";
             _commandPanel.PlacementIndex = _placementIndex;
             _commandPanel.PlacementCount = _availableBuildings?.Count ?? 0;
+            _commandPanel.PlacementCost = _placementDef?.CostCredits ?? 0;
             _commandPanel.MinimapTexture = _minimap.Texture;
             _commandPanel.SelectedBuilding = GetSelectedBuilding();
             _commandPanel.UnitDefs = _config.UnitDefs;
+            _commandPanel.Credits = _resourceManager.GetCredits(0);
             _commandPanel.Draw(_sb);
 
             base.Draw(gameTime);
@@ -953,6 +1091,33 @@ namespace FNARTS.Game
             }
         }
 
+        /// <summary>
+        /// Called by CombatSystem when an entity dies.
+        /// Clears attack targets pointing to the dead entity, removes from
+        /// selection, and cleans up the entity manager.
+        /// </summary>
+        private void OnEntityDeath(Entity entity)
+        {
+            // Clear attack targets pointing to the dead entity
+            foreach (var e in _entities.AllEntities)
+            {
+                if (e is Unit u && u.AttackTargetId == entity.Id)
+                {
+                    u.AttackTargetId = null;
+                    u.Path = null;
+                }
+            }
+
+            // Remove from selection
+            _selection.Deselect(entity);
+
+            // Remove from entity manager
+            _entities.RemoveDead();
+
+            GameLogger.Info($"Entity died: {entity.GetType().Name}#{entity.Id} " +
+                $"at ({entity.WorldPosition.X:F0},{entity.WorldPosition.Y:F0})");
+        }
+
         protected override void Dispose(bool disposing)
         {
             if (disposing)
@@ -960,6 +1125,8 @@ namespace FNARTS.Game
                 _assets?.Dispose();
                 _tileRenderer?.Dispose();
                 _entityRenderer?.Dispose();
+                _hpBarRenderer?.Dispose();
+                _fogRenderer?.Dispose();
                 _debugOverlay?.Dispose();
                 _commandPanel?.Dispose();
                 _minimap?.Dispose();

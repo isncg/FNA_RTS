@@ -28,11 +28,15 @@ namespace FNARTS.Game
         public string PlacementName { get; set; } = "";
         public int PlacementIndex { get; set; }
         public int PlacementCount { get; set; }
+        public int PlacementCost { get; set; }
         public Texture2D MinimapTexture { get; set; }
 
         // Production state (set when a single producing building is selected)
         public Building SelectedBuilding { get; set; }
         public Dictionary<string, UnitDef> UnitDefs { get; set; }
+
+        // Economy (Phase 2.5)
+        public int Credits { get; set; }
 
         // Hit-testing: production button screen-space rects (cleared each Draw)
         private readonly List<(Rectangle rect, string unitDefId)> _prodButtons = new();
@@ -63,9 +67,14 @@ namespace FNARTS.Game
             sb.Draw(_bgTex, new Rectangle(0, panelY, w, 2),
                 new Color(100, 180, 255, 200));
 
-            // ── Left: selection info ──────────────────────────────────
+            // ── Credits (top-left corner of panel) ────────────────────
             int x = PADDING;
             int y = panelY + PADDING;
+            DrawHeader(sb, $"CREDITS: {Credits}", ref x, ref y, new Color(255, 215, 0));
+            y += 2; // spacer
+
+            // ── Left: selection info ──────────────────────────────────
+            x = PADDING;
 
             if (PlacementActive)
             {
@@ -73,6 +82,8 @@ namespace FNARTS.Game
                 x = PADDING;
                 string typeStr = $"[{PlacementIndex + 1}/{PlacementCount}] {PlacementName}";
                 DrawLine(sb, typeStr, ref x, ref y, new Color(200, 200, 200));
+                x = PADDING;
+                DrawLine(sb, $"Cost: ${PlacementCost}", ref x, ref y, new Color(255, 215, 0));
                 x = PADDING;
                 DrawLine(sb, "Tab/1-9:switch  LClick:place  RCancel/Esc:cancel", ref x, ref y,
                     new Color(140, 140, 160));
@@ -85,11 +96,12 @@ namespace FNARTS.Game
                 // Group by type
                 int units = 0, buildings = 0;
                 string lastName = "";
+                Entity singleEntity = null;
                 foreach (var id in ids)
                 {
                     var e = Entities?.GetEntity(id);
-                    if (e is Unit) { units++; lastName = ((Unit)e).Definition.Name; }
-                    else if (e is Building) { buildings++; lastName = ((Building)e).Definition.Name; }
+                    if (e is Unit u) { units++; lastName = u.Definition.Name; singleEntity = e; }
+                    else if (e is Building b) { buildings++; lastName = b.Definition.Name; singleEntity = e; }
                 }
 
                 x = PADDING;
@@ -105,9 +117,21 @@ namespace FNARTS.Game
                     DrawLine(sb, $" Buildings: {buildings}", ref x, ref y, new Color(140, 140, 180));
                     x = PADDING;
                 }
-                if (ids.Count == 1)
+                if (ids.Count == 1 && singleEntity != null)
                 {
                     DrawLine(sb, $"Name: {lastName}", ref x, ref y, new Color(180, 180, 180));
+                    x = PADDING;
+                    int hp = singleEntity is Unit su ? su.CurrentHP
+                           : singleEntity is Building sb2 ? sb2.CurrentHP : 0;
+                    int maxHp = singleEntity is Unit su2 ? su2.MaxHP
+                              : singleEntity is Building sb3 ? sb3.MaxHP : 0;
+                    DrawLine(sb, $"HP: {hp}/{maxHp}", ref x, ref y, new Color(100, 255, 100));
+                    if (singleEntity is Unit su3 && su3.AttackDamage > 0)
+                    {
+                        x = PADDING;
+                        DrawLine(sb, $"Atk: {su3.AttackDamage}  Range: {su3.AttackRange:F0}",
+                            ref x, ref y, new Color(255, 180, 80));
+                    }
                 }
                 x = PADDING;
                 DrawLine(sb, "Right-click: move   B: build mode", ref x, ref y,
@@ -187,7 +211,7 @@ namespace FNARTS.Game
                         sb.Draw(_bgTex, new Rectangle(px, py + btnH - 1, btnW, 1),
                             new Color(80, 100, 140, 200));
 
-                        string label = $"+ {ud.Name} ({ud.BuildTime:F1}s)";
+                        string label = $"+ {ud.Name}  ${ud.CostCredits}  ({ud.BuildTime:F1}s)";
                         _font.DrawString(sb, label,
                             new Vector2(px + 6, py + (btnH - BitmapFont.GLYPH_H) / 2),
                             new Color(200, 210, 230));
@@ -262,6 +286,14 @@ namespace FNARTS.Game
                     return unitDefId;
             }
             return null;
+        }
+
+        /// <summary>Draw a string centered horizontally at a given Y position.</summary>
+        public void DrawStringCentered(SpriteBatch sb, string text, int y, Color color)
+        {
+            int textW = text.Length * (BitmapFont.GLYPH_W + 1);
+            int x = (ViewportW - textW) / 2;
+            _font.DrawString(sb, text, new Vector2(x, y), color);
         }
 
         public void Dispose()
