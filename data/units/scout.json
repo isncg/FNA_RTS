@@ -11,5 +11,6 @@
   "armor": 0,
   "visionRange": 10,
   "costCredits": 250,
-  "isAircraft": true
+  "isAircraft": true,
+  "collisionRadius": 12.0
 }

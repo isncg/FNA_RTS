@@ -40,13 +40,13 @@ namespace FNARTS.Core.Tests.Math
         }
 
         [Fact]
-        public void IsoToWorldCenter_OffsetsFromTopLeft()
+        public void IsoToWorldCenter_OffsetsFromSouthVertex()
         {
-            var tl = CoordUtil.IsoToWorld(new IsoCoord(5, 3));
+            var south = CoordUtil.IsoToWorld(new IsoCoord(5, 3));
             var center = CoordUtil.IsoToWorldCenter(new IsoCoord(5, 3));
-            // Grid center: same X as top-left, Y offset by -HALF_TILE_H (up)
-            Assert.Equal(tl.X, center.X, 3);
-            Assert.Equal(tl.Y - CoordUtil.HALF_TILE_H, center.Y, 3);
+            // Grid centre: same X as the south vertex, Y offset by -HALF_TILE_H (up)
+            Assert.Equal(south.X, center.X, 3);
+            Assert.Equal(south.Y - CoordUtil.HALF_TILE_H, center.Y, 3);
         }
 
         [Fact]
@@ -99,6 +99,32 @@ namespace FNARTS.Core.Tests.Math
             // Grid center is at (gx+0.5, gy+0.5) in continuous space
             Assert.Equal(5.5f, fc.X, 3);
             Assert.Equal(3.5f, fc.Y, 3);
+        }
+
+        [Fact]
+        public void TileDrawOrigin_SpriteCentre_IsTileCentre()
+        {
+            // The 64×32 diamond sprite drawn at TileDrawOrigin has its centre
+            // at + (HALF_W, HALF_H); that must coincide with the logical tile
+            // centre so rendering and the world↔grid projection align.
+            for (int x = 0; x < 5; x++)
+            for (int y = 0; y < 5; y++)
+            {
+                var c = new IsoCoord(x, y);
+                var drawn = CoordUtil.TileDrawOrigin(c)
+                    + new Vector2(CoordUtil.HALF_TILE_W, CoordUtil.HALF_TILE_H);
+                Assert.Equal(CoordUtil.IsoToWorldCenter(c), drawn);
+                Assert.Equal(c, CoordUtil.WorldToIso(drawn));
+            }
+        }
+
+        [Fact]
+        public void BuildingWorldOrigin_IsFootprintCentre()
+        {
+            // 2×2 at (5,5): footprint centre is continuous grid (6,6).
+            var origin = CoordUtil.BuildingWorldOrigin(new IsoCoord(5, 5), 2, 2);
+            Assert.Equal(0f, origin.X, 3);
+            Assert.Equal(-12f * CoordUtil.HALF_TILE_H, origin.Y, 3);
         }
 
         [Fact]

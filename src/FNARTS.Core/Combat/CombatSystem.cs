@@ -25,7 +25,7 @@ namespace FNARTS.Core.Combat
         /// <param name="onDeath">Called once per dead entity after the traversal
         /// loop completes (safe to mutate the entity collection here).</param>
         public void Update(float dt, EntityManager entities,
-            Pathfinder pathfinder, Action<Entity> onDeath)
+            PathfindingFacade pathfinder, Action<Entity> onDeath)
         {
             _deadEntities.Clear();
             _frameCounter++;
@@ -65,7 +65,7 @@ namespace FNARTS.Core.Combat
         }
 
         private void ProcessUnitCombat(Unit attacker, EntityManager entities,
-            Pathfinder pathfinder, float dt)
+            PathfindingFacade pathfinder, float dt)
         {
             var target = entities.GetEntity(attacker.AttackTargetId!.Value);
             if (target == null || !target.IsAlive)
@@ -86,6 +86,11 @@ namespace FNARTS.Core.Combat
 
             if (dist <= attacker.AttackRange)
             {
+                // Stop movement when in attack range (prevents sliding past target)
+                attacker.Velocity = System.Numerics.Vector2.Zero;
+                attacker.Path = null;
+                attacker.PathIndex = 0;
+
                 if (attacker.CanAttack)
                 {
                     ApplyDamage(attacker, target);
@@ -105,7 +110,7 @@ namespace FNARTS.Core.Combat
         /// Healer tick: move toward and heal the target friendly unit.
         /// </summary>
         private void ProcessHealer(Unit healer, EntityManager entities,
-            Pathfinder pathfinder, float dt)
+            PathfindingFacade pathfinder, float dt)
         {
             var target = entities.GetEntity(healer.AttackTargetId!.Value);
             if (target == null || !target.IsAlive || target.Faction != healer.Faction)
@@ -121,6 +126,11 @@ namespace FNARTS.Core.Combat
 
             if (dist <= healer.HealRange)
             {
+                // Stop movement when in heal range
+                healer.Velocity = System.Numerics.Vector2.Zero;
+                healer.Path = null;
+                healer.PathIndex = 0;
+
                 if (healer.CanAttack)
                 {
                     targetUnit.CurrentHP = Math.Min(
@@ -170,7 +180,7 @@ namespace FNARTS.Core.Combat
         /// Auto-pursuit pathfinding (shared by attackers and healers).
         /// Re-paths every 30 frames (0.5 s) to reduce CPU overhead.
         /// </summary>
-        private void AutoPursuit(Unit pursuer, Entity target, Pathfinder pathfinder)
+        private void AutoPursuit(Unit pursuer, Entity target, PathfindingFacade pathfinder)
         {
             if (_frameCounter % 30 == 0 || pursuer.Path == null)
             {

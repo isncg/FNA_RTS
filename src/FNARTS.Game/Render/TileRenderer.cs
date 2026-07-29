@@ -41,7 +41,7 @@ namespace FNARTS.Game
 
             foreach (var c in tiles)
             {
-                Vector2 pos = CoordUtil.IsoToWorld(c).ToXna();
+                Vector2 pos = CoordUtil.TileDrawOrigin(c).ToXna();
                 float depth = MathHelper.Clamp((c.X + c.Y + 0.3f) / maxSum, 0, 1);
                 sb.Draw(tex, pos, null, tint, 0f, Vector2.Zero, 1f,
                     SpriteEffects.None, depth);
@@ -104,7 +104,7 @@ namespace FNARTS.Game
                 for (int gx = minX; gx <= maxX; gx++)
                 {
                     bool inBounds = (uint)gx < (uint)W && (uint)gy < (uint)H;
-                    Vector2 pos = CoordUtil.IsoToWorld(new IsoCoord(gx, gy)).ToXna();
+                    Vector2 pos = CoordUtil.TileDrawOrigin(new IsoCoord(gx, gy)).ToXna();
 
                     if (inBounds)
                     {

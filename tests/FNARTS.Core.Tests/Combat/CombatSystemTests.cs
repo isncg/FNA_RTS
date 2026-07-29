@@ -23,11 +23,14 @@ namespace FNARTS.Core.Tests.Combat
             return new Building(def, new IsoCoord(gx, gy));
         }
 
-        private static (EntityManager mgr, Pathfinder pf, List<FNARTS.Core.Entity> deaths)
+        private static (EntityManager mgr, PathfindingFacade pf, List<FNARTS.Core.Entity> deaths)
             Setup()
         {
             var mgr = new EntityManager();
-            var pf = new Pathfinder { MapWidth = 51, MapHeight = 51, IsPassable = _ => true };
+            var terrain = TerrainCostProvider.CreateDefault(51, 51,
+                getTileType: _ => TileType.Grass,
+                isBlockedByEntity: _ => false);
+            var pf = new PathfindingFacade(terrain);
             var deaths = new List<FNARTS.Core.Entity>();
             return (mgr, pf, deaths);
         }

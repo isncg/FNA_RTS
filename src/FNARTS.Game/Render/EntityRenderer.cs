@@ -4,6 +4,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using FNARTS.Core;
 using FNARTS.Core.Fog;
+using FNARTS.Core.Movement;
 
 namespace FNARTS.Game
 {
@@ -22,7 +23,8 @@ namespace FNARTS.Game
         /// <param name="fog">Optional fog-of-war — entities on Unexplored tiles
         /// are hidden, entities on Explored tiles are dimmed.</param>
         public void Draw(SpriteBatch sb, Camera2D camera, EntityManager entities,
-            SelectionSystem selection, FogOfWar fog = null)
+            SelectionSystem selection, GroupMovement? groupMovement = null,
+            FogOfWar? fog = null)
         {
             // Normalisation divisor — max(gx+gy) for the 51×51 map.
             const float maxSum = 102f;
@@ -108,6 +110,19 @@ namespace FNARTS.Game
 
                 sb.Draw(tex, pos, null, tint, 0f, origin, 1f,
                     SpriteEffects.None, depth);
+
+                // Leader indicator: gold diamond above the unit
+                if (groupMovement != null && entity is Unit unitEntity
+                    && groupMovement.Units[groupMovement.LeaderIndex].Id == unitEntity.Id)
+                {
+                    Texture2D hlTex = _assets.SelectionHighlight;
+                    Vector2 hlOrigin = new Vector2(hlTex.Width / 2f, hlTex.Height / 2f);
+                    float indicatorY = pos.Y - origin.Y - 10f;
+                    // Use a gold tint
+                    sb.Draw(hlTex, new Vector2(pos.X, indicatorY), null,
+                        new Color(255, 200, 50, 220), 0f, hlOrigin, 0.6f,
+                        SpriteEffects.None, depth);
+                }
             }
 
             sb.End();

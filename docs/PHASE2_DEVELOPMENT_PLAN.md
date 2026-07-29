@@ -767,6 +767,11 @@ public void RemoveDead()
 
 ### 4.8 编队移动 — 编队排列 + 局部避障 (FNARTS.Core) 【可选打磨】
 
+> **已实施（as-built）变更**：本节原方案（`FormationPosition` 固定方阵 + `SeparationBehavior` 局部避障）已按 RA1/RA2 官方行为重做，保留本节作为历史设计记录：
+> - `FormationPosition`（Box/Line 方阵模板）→ 已删除，由 `GroupMovement` 取代（RA1 `Toggle_Formation` 语义：下单瞬间各单位相对包围盒中心的格子偏移快照，当前布局即队形，无行军中维护）
+> - `SeparationBehavior` 软推挤 → 已移除，由 `MovementSystem` 取代（OpenRA `Mobile` 进出格仲裁：一格一单位、预订/等待/Nudge/重寻路/StepAside）
+> - 编队移动**默认关闭**：多选移动 = RA1 `FormMove=false`（全员同一目标格聚集，仲裁散开）；`GroupMovement` 保留但休眠，待 Ctrl+编队与队形开关实现后启用
+
 编队移动在战斗系统集成完成后作为打磨项实现。它不是核心战斗循环的必需部分（右键 → 寻路 → 攻击 → 死亡已经完整），但显著改善多单位操作的体验。
 
 #### FormationPosition — 编队位置计算
@@ -1246,6 +1251,8 @@ Test_CombatLoop_RenderVerifiesUnitDeath
 3. 在 `RTSGame.UpdatePlaying()` 中集成分离力
 4. `tests/FNARTS.Core.Tests/Movement/SeparationTests.cs` — 可选
 
+> **as-built**：第 5 步的实际产出为 `GroupMovement.cs`（RA1 式相对偏移编队）+ `MovementSystem.cs`（OpenRA 式进出格仲裁），详见 4.8 节说明；编队当前默认关闭（多选 = 聚集移动）。
+
 > **如果时间紧张，编队移动可以推迟到 Phase 3。** 核心战斗循环（单单位攻击）在步骤 4 已经完整。
 
 ### 第 6 步：FNA_Test 基础设施 + 全面测试（约 1.5-2 天）
@@ -1352,7 +1359,7 @@ Phase 2 必须继续遵循 Phase 1 建立的确定性设计原则，为 Phase 3 
 | 右键交互 | 全部 = 移动指令 | 敌方 = 攻击，友方/空地 = 移动 |
 | 实体属性 | Id, Position, Faction | + CurrentHP, Armor |
 | 指令类型 | Move, Build | + Attack |
-| 多单位 | 各自独立 | 编队排列 + 局部避障 |
+| 多单位 | 各自独立 | 同目标格聚集 + OpenRA 式进出格仲裁（编队默认关闭） |
 | 测试数量 | 93 Core + 4 Game | ~120 Core + 4 Game |
 | 战争迷雾 | 无 | 推迟至 Phase 3 |
 
@@ -1378,7 +1385,7 @@ Phase 2 必须继续遵循 Phase 1 建立的确定性设计原则，为 Phase 3 
 | `TILE_HEIGHT` | 32 | 瓦片纹理高度（像素） |
 | `FIXED_DT` | 1/60f | 固定逻辑帧步长（秒） |
 | `PATHFIND_REPATH_INTERVAL` | 30 | 追击重新寻路间隔（帧数） |
-| `SEPARATION_RADIUS` | 24f | 局部避障触发距离（世界像素） |
-| `FORMATION_SPACING` | 48f | 编队单位间距（世界像素） |
+| `SEPARATION_RADIUS` | 24f | 局部避障触发距离（已废弃：软推挤被 MovementSystem 仲裁取代） |
+| `FORMATION_SPACING` | 48f | 编队单位间距（已废弃：固定方阵被相对偏移快照取代） |
 | `MAP_DEFAULT_SIZE` | 51 | 默认地图尺寸（网格格数） |
 | `MAX_PATH_ITERATIONS` | 2500 | A\* 最大搜索迭代数 |

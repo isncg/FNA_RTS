@@ -4,4 +4,7 @@
     <RootNamespace>FNARTS.Core</RootNamespace>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
   </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="FNARTS.Core.Tests" />
+  </ItemGroup>
 </Project>

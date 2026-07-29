@@ -11,5 +11,6 @@
   "armor": 1,
   "visionRange": 6,
   "costCredits": 150,
-  "canHitAir": true
+  "canHitAir": true,
+  "collisionRadius": 14.0
 }

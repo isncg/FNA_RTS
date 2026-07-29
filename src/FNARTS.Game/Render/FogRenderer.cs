@@ -82,7 +82,7 @@ namespace FNARTS.Game
                     var state = fog[gx, gy];
                     if (state == FogCell.Visible) continue;
 
-                    Vector2 pos = CoordUtil.IsoToWorld(new IsoCoord(gx, gy)).ToXna();
+                    Vector2 pos = CoordUtil.TileDrawOrigin(new IsoCoord(gx, gy)).ToXna();
                     // Slightly in front of terrain to avoid z-fighting.
                     float depth = MathHelper.Clamp(
                         (gx + gy + 0.15f) / maxSum, 0, 1);

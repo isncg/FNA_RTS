@@ -10,5 +10,6 @@
   "attackCooldown": 2.0,
   "armor": 8,
   "visionRange": 4,
-  "costCredits": 200
+  "costCredits": 200,
+  "collisionRadius": 22.0
 }

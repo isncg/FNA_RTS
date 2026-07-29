@@ -10,6 +10,7 @@ This is an **RTS game** built on the **FNA HLSL fork** — a modified FNA (XNA 4
 
 - `docs/DEVELOPMENT_PLAN.md` — 整体开发路线 (3 phases: MVP → Combat → Factions+Networking)
 - `docs/PHASE1_DEVELOPMENT_PLAN.md` — 第一阶段详细开发文档 (MVP: 等距地图 + 建筑 + 单位 + 选择 + 移动)
+- `docs/PATHFINDING_REDESIGN.md` — 寻路系统 as-built 架构（含单位进出格仲裁 MovementSystem 集成说明）
 
 ## Repository Map
 

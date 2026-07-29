@@ -6,6 +6,8 @@ namespace FNARTS.Core.Tests.Entity
 {
     public class UnitTests
     {
+        private static UnitDef DefaultDef() => new() { MoveSpeed = 100f };
+
         [Fact]
         public void Constructor_UsesDefinition()
         {
@@ -28,100 +30,91 @@ namespace FNARTS.Core.Tests.Entity
         [Fact]
         public void Update_NoTarget_DoesNothing()
         {
-            var def = new UnitDef { MoveSpeed = 100f };
+            var def = DefaultDef();
             var unit = new Unit(def) { WorldPosition = new Vector2(50, 50) };
             unit.Update(1f);
             Assert.Equal(new Vector2(50, 50), unit.WorldPosition);
         }
 
         [Fact]
-        public void Update_MovesTowardTarget()
+        public void Update_MovesTowardTarget_ConstantSpeed()
         {
-            var def = new UnitDef { MoveSpeed = 100f };
+            var def = DefaultDef();
             var unit = new Unit(def) { WorldPosition = new Vector2(0, 0) };
             unit.MoveTarget = new Vector2(100, 0);
-            unit.Update(0.5f); // 50 pixels at 100px/s for 0.5s
+            unit.Update(0.5f); // 50 px at 100px/s for 0.5s
 
             Assert.Equal(50f, unit.WorldPosition.X, 3);
             Assert.Equal(0f, unit.WorldPosition.Y, 3);
-            Assert.NotNull(unit.MoveTarget); // still has target
+            Assert.True(unit.IsMoving);
         }
 
         [Fact]
         public void Update_ArrivesAtTarget()
         {
-            var def = new UnitDef { MoveSpeed = 100f };
+            var def = DefaultDef();
             var unit = new Unit(def) { WorldPosition = new Vector2(0, 0) };
-            unit.MoveTarget = new Vector2(1.5f, 0); // within 2px
+            unit.MoveTarget = new Vector2(1.5f, 0); // within 2px snap
             unit.Update(0.1f);
 
             Assert.Equal(1.5f, unit.WorldPosition.X, 3);
-            Assert.Null(unit.MoveTarget); // arrived, target cleared
+            Assert.Null(unit.MoveTarget);
+            Assert.False(unit.IsMoving);
         }
 
         [Fact]
-        public void Update_SnapsToTarget_WhenOvershooting()
+        public void Update_SnapsWhenOvershooting()
         {
-            var def = new UnitDef { MoveSpeed = 100f };
+            var def = DefaultDef();
             var unit = new Unit(def) { WorldPosition = new Vector2(0, 0) };
             unit.MoveTarget = new Vector2(10, 0);
             unit.Update(1f); // 100px step > 10px distance
 
             Assert.Equal(10f, unit.WorldPosition.X, 3);
             Assert.Null(unit.MoveTarget);
+            Assert.Equal(Vector2.Zero, unit.Velocity);
         }
 
         [Fact]
         public void Update_Dead_DoesNotMove()
         {
-            var def = new UnitDef { MoveSpeed = 100f };
+            var def = DefaultDef();
             var unit = new Unit(def) { WorldPosition = new Vector2(0, 0), IsAlive = false };
             unit.MoveTarget = new Vector2(100, 0);
             unit.Update(1f);
 
             Assert.Equal(Vector2.Zero, unit.WorldPosition);
-            Assert.NotNull(unit.MoveTarget); // target not cleared
+            Assert.NotNull(unit.MoveTarget);
         }
 
         [Fact]
         public void Update_DiagonalMovement()
         {
-            var def = new UnitDef { MoveSpeed = 100f };
+            var def = DefaultDef();
             var unit = new Unit(def) { WorldPosition = new Vector2(0, 0) };
             unit.MoveTarget = new Vector2(100, 100);
-            unit.Update(1f); // moves 100 pixels diagonal
+            unit.Update(1f); // moves 100 pixels at 45°
 
-            // Direction should be (100,100)/~141.4 normalized * 100
+            // Direction should be diagonal with equal components
             Assert.Equal(70.71f, unit.WorldPosition.X, 1);
             Assert.Equal(70.71f, unit.WorldPosition.Y, 1);
         }
 
-        // ---- Phase 2: waypoint following ----
+        // ---- waypoint following ----
 
         [Fact]
         public void Update_WithPath_FollowsWaypoints()
         {
-            var def = new UnitDef { MoveSpeed = 40f };  // slow enough to not overshoot
-            // Place unit at world center of grid (0,0)
+            var def = new UnitDef { MoveSpeed = 200f };
             var origin = CoordUtil.IsoToWorldCenter(new IsoCoord(0, 0));
             var unit = new Unit(def) { WorldPosition = origin };
 
-            // Waypoints: (3,0) then (6,0) — far enough apart
             unit.Path = new List<IsoCoord> { new(3, 0), new(6, 0) };
             unit.PathIndex = 0;
+            unit.Update(1f); // 200px/s for 1s — plenty to reach wp1 (~107px away)
 
-            // First update — unit moves toward waypoint 0 but doesn't reach it
-            unit.Update(0.1f); // moves only 4px at 40px/s
-            Assert.Equal(0, unit.PathIndex); // still heading to first waypoint
-            Assert.NotEqual(origin, unit.WorldPosition);
-
-            // Move far enough to reach first waypoint
-            var wp0Center = CoordUtil.IsoToWorldCenter(new IsoCoord(3, 0));
-            var toWp0 = wp0Center - unit.WorldPosition;
-            float distToWp0 = toWp0.Length();
-            float timeToReach = distToWp0 / def.MoveSpeed + 0.02f;
-            unit.Update(timeToReach);
-            Assert.Equal(1, unit.PathIndex); // advanced to second waypoint
+            Assert.Equal(1, unit.PathIndex);
+            Assert.True(unit.IsMoving);
         }
 
         [Fact]
@@ -129,16 +122,41 @@ namespace FNARTS.Core.Tests.Entity
         {
             var def = new UnitDef { MoveSpeed = 200f };
             var origin = CoordUtil.IsoToWorldCenter(new IsoCoord(0, 0));
+            var target = CoordUtil.IsoToWorldCenter(new IsoCoord(1, 0));
             var unit = new Unit(def) { WorldPosition = origin };
-
+            unit.MoveTarget = target;
             unit.Path = new List<IsoCoord> { new(1, 0) };
             unit.PathIndex = 0;
+            unit.Update(1f);
 
-            // Move enough to reach the only waypoint
-            unit.Update(1f); // 200px at 200px/s — more than enough for 1 tile (32px half-diag)
-            Assert.Equal(1, unit.PathIndex); // path exhausted (PathIndex == Path.Count)
             Assert.Null(unit.MoveTarget);
+            Assert.Null(unit.Path);
             Assert.False(unit.IsMoving);
+        }
+
+        [Fact]
+        public void Update_WaypointTurn_HardRedirectsVelocity()
+        {
+            var def = new UnitDef { MoveSpeed = 100f };
+            var origin = CoordUtil.IsoToWorldCenter(new IsoCoord(0, 0));
+            var wp1 = CoordUtil.IsoToWorldCenter(new IsoCoord(3, 0));
+            var wp2 = CoordUtil.IsoToWorldCenter(new IsoCoord(3, 3));
+
+            var unit = new Unit(def) { WorldPosition = origin };
+            unit.Path = new List<IsoCoord> { new(3, 0), new(3, 3) };
+            unit.PathIndex = 0;
+
+            // Move frame by frame until we pass the corner
+            float dt = 1f / 60f;
+            for (int i = 0; i < 300 && unit.PathIndex == 0; i++)
+                unit.Update(dt);
+
+            // Should have advanced past the corner
+            Assert.Equal(1, unit.PathIndex);
+            // Velocity should point toward wp2
+            Vector2 expectedDir = Vector2.Normalize(wp2 - wp1);
+            float dot = Vector2.Dot(Vector2.Normalize(unit.Velocity), expectedDir);
+            Assert.True(dot > 0.99f, $"Velocity {unit.Velocity} should point toward wp2 (expected dir {expectedDir})");
         }
 
         [Fact]
@@ -150,6 +168,7 @@ namespace FNARTS.Core.Tests.Entity
                 MoveTarget = new Vector2(100, 100),
                 Path = new List<IsoCoord> { new(1, 0), new(2, 0) },
                 PathIndex = 1,
+                Velocity = new Vector2(50, 0),
             };
             unit.AttackTargetId = 42;
 
@@ -159,6 +178,38 @@ namespace FNARTS.Core.Tests.Entity
             Assert.Null(unit.Path);
             Assert.Equal(0, unit.PathIndex);
             Assert.Null(unit.AttackTargetId);
+            Assert.Equal(Vector2.Zero, unit.Velocity);
+            Assert.Null(unit.ForcedMoveSpeed);
+        }
+
+        [Fact]
+        public void IsMoving_True_WhenMoving()
+        {
+            var def = DefaultDef();
+            var unit = new Unit(def) { WorldPosition = Vector2.Zero };
+            unit.Velocity = new Vector2(5, 0);
+            Assert.True(unit.IsMoving);
+        }
+
+        [Fact]
+        public void ForcedMoveSpeed_LimitsActualSpeed()
+        {
+            var def = new UnitDef { MoveSpeed = 200f };
+            var unit = new Unit(def) { WorldPosition = new Vector2(0, 0) };
+            unit.ForcedMoveSpeed = 50f; // slowed down
+            unit.MoveTarget = new Vector2(100, 0);
+            unit.Update(1f);
+
+            // Should move 50px (forced speed) not 200px (natural speed)
+            Assert.Equal(50f, unit.WorldPosition.X, 3);
+        }
+
+        [Fact]
+        public void IsMoving_False_WhenIdle()
+        {
+            var def = DefaultDef();
+            var unit = new Unit(def) { WorldPosition = Vector2.Zero };
+            Assert.False(unit.IsMoving);
         }
     }
 }

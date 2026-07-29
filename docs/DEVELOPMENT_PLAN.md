@@ -94,7 +94,8 @@ FNA_RTS/                  ← 本项目 (RTS 游戏)
 | `CommandSystem` | Core | 移动/攻击/建造/生产指令的生成与执行 | P1 |
 | `ProductionSystem` | Core | 建筑生产队列, 单位训练计时 | P2 |
 | `CombatSystem` | Core | 攻击判定, 伤害计算, HP/护甲 | P2 |
-| `Pathfinding` | Core | A\* 网格寻路, 群体移动 | P2 |
+| `Pathfinding` | Core | A\* 网格寻路 (分层 HPF), 地形/建筑阻挡 | P2 |
+| `MovementSystem` | Core | OpenRA 式单位进出格仲裁: 一格一单位, 预订/等待/Nudge/重寻路 | P2 |
 | `FogOfWar` | Core | 战争迷雾, 视野系统 | P2 |
 | `FactionSystem` | Core | 阵营定义, 科技树, 非对称平衡 | P3 |
 | `NetSystem` | Core | 帧同步, 确定性逻辑, 输入广播 | P3 |
@@ -267,7 +268,7 @@ MVP 需要的 FNA_Test 基础设施测试（在 FNA_Test 中先完成）：
 | 兵种体系 | 数据驱动的单位/建筑定义（JSON），属性：HP、速度、攻击力、攻击范围、攻击冷却 |
 | 生产队列 | 建筑训练单位（指定类型和数量），训练计时 |
 | 寻路 | A\* 网格寻路，避开建筑物和不可通过地形 |
-| 群体移动 | 多单位同时移动，避免重叠（局部避障） |
+| 群体移动 | 多单位同时移动；一格一单位 + OpenRA 式进出格仲裁（预订/等待/Nudge/重寻路）化解拥堵；编队移动默认关闭，多选移动 = 全员同一目标格聚集（RA1 FormMove=false） |
 | 战争迷雾 | 视野范围，已探索/可见/不可见三层状态 |
 
 ### 5.3 兵种体系设计

@@ -48,14 +48,15 @@ namespace FNARTS.Game
 
         private GameConfig _config;
         private ProductionSystem _productionSystem;
-        private Pathfinder _pathfinder;
+        private PathfindingFacade _pathfinder;
+        private MovementSystem _movement;
         private CombatSystem _combatSystem;
         private FogOfWar _fogOfWar;
         private FogRenderer _fogRenderer;
         private ResourceManager _resourceManager;
         private VictorySystem _victorySystem;
         private VictoryState _victoryState = VictoryState.Ongoing;
-        private readonly HashSet<IsoCoord> _reservedTiles = new();
+        private GroupMovement? _activeGroupMovement;
 
         // Placement mode
         private List<BuildingDef> _availableBuildings;
@@ -135,17 +136,16 @@ namespace FNARTS.Game
             _selection = new SelectionSystem();
             _commands = new CommandSystem();
 
-            // Pathfinder: inject passability via delegates (Core has no TileMap ref)
-            _pathfinder = new Pathfinder
-            {
-                MapWidth = _map.Width,
-                MapHeight = _map.Height,
-                IsPassable = coord =>
-                    _map.InBounds(coord) &&
-                    _map.IsPassable(coord) &&
-                    _entities.IsAreaFree(coord, 1, 1) &&
-                    !_reservedTiles.Contains(coord),
-            };
+            // Pathfinder: inject terrain costs via delegates (Core has no TileMap ref)
+            var terrainProvider = TerrainCostProvider.CreateDefault(
+                _map.Width, _map.Height,
+                getTileType: coord => _map.GetTile(coord).Type,
+                isBlockedByEntity: coord => !_entities.IsAreaFree(coord, 1, 1));
+            _pathfinder = new PathfindingFacade(terrainProvider);
+
+            // OpenRA-style tile occupancy arbitration (one unit per tile):
+            // gates tile entry, nudges idle blockers, repaths when blocked.
+            _movement = new MovementSystem(_pathfinder, _entities, terrainProvider);
 
             // Combat system + enemy/friendly detection
             _combatSystem = new CombatSystem();
@@ -163,16 +163,17 @@ namespace FNARTS.Game
             CreateTestEntities();
 
             // Camera bounds: playable diamond |gx-cx|+|gy-cy| ≤ R.
-            // IsoToWorld gives the tile top-left corner; the diamond
-            // extends +TILE_WIDTH right and +TILE_HEIGHT down from there.
+            // IsoToWorld gives a tile's south vertex; each tile diamond
+            // extends ±HALF_TILE_W in X and TILE_HEIGHT up (−Y) from it.
             int R = MAP_RADIUS;
             int cx = MAP_CENTER, cy = MAP_CENTER;
-            float playMinWx = (cx - cy - R) * CoordUtil.HALF_TILE_W;   // -640
+            float playMinWx = (cx - cy - R) * CoordUtil.HALF_TILE_W
+                            - CoordUtil.HALF_TILE_W;                    // -672
             float playMaxWx = (cx - cy + R) * CoordUtil.HALF_TILE_W
-                            + CoordUtil.TILE_WIDTH;                     // +64 → 704
-            float playMinWy = -(cx + cy + R) * CoordUtil.HALF_TILE_H;  // -1120
-            float playMaxWy = -(cx + cy - R) * CoordUtil.HALF_TILE_H
-                            + CoordUtil.TILE_HEIGHT;                    // +32 → -448
+                            + CoordUtil.HALF_TILE_W;                    // +32 → 672
+            float playMinWy = -(cx + cy + R) * CoordUtil.HALF_TILE_H
+                            - CoordUtil.TILE_HEIGHT;                    // -32 → -1152
+            float playMaxWy = -(cx + cy - R) * CoordUtil.HALF_TILE_H;   // -480
             _camera.WorldBoundMin = new Vector2(playMinWx, playMinWy);
             _camera.WorldBoundMax = new Vector2(playMaxWx, playMaxWy);
             // Centre camera on the bounding box of the playable diamond.
@@ -462,6 +463,7 @@ namespace FNARTS.Game
                     {
                         var b = new Building(_placementDef, _placementGrid);
                         _entities.AddEntity(b);
+                        NotifyPathfinderOfBuilding(b);
                         GameLogger.Info($"Placed {_placementDef.Name} at " +
                             $"({_placementGrid.X},{_placementGrid.Y}) " +
                             $"({_placementDef.CostCredits} credits)");
@@ -558,121 +560,22 @@ namespace FNARTS.Game
                     goto skipCommand;
                 }
 
-                if (selectedUnits.Count == 1)
+                if (selectedUnits.Count >= 1)
                 {
-                    // Single unit — use click point directly
-                    var unit = selectedUnits[0];
-                    unit.ClearOrders();              // reset old path/attack state first
-                    unit.AttackTargetId = attackTargetId; // set AFTER ClearOrders
-                    AssignUnitPath(unit, targetPos);
-                }
-                else if (selectedUnits.Count > 1)
-                {
-                    // ── Multi-unit formation: greedy closest-assignment with
-                    //     tile reservation (back-to-front, C&C2 style) ──────
-                    var centerTile = CoordUtil.WorldToIso(targetPos);
-                    var tiles = FormationPosition.Compute(centerTile, selectedUnits.Count);
-
-                    // group centroid in grid coords (for back-to-front ordering)
-                    float cx = 0, cy = 0;
-                    foreach (var u in selectedUnits)
+                    // ── Formation movement is OFF by default (RA1
+                    //     FormMove=false semantics): every unit gets the
+                    //     SAME target tile and pathfinds to it independently;
+                    //     MovementSystem arbitration spreads them onto free
+                    //     tiles around it. GroupMovement stays dormant until
+                    //     Ctrl+groups + formation toggle are implemented. ──
+                    var targetTile = CoordUtil.WorldToIso(targetPos);
+                    foreach (var unit in selectedUnits)
                     {
-                        var gc = CoordUtil.WorldToIso(u.WorldPosition);
-                        cx += gc.X; cy += gc.Y;
-                    }
-                    cx /= selectedUnits.Count; cy /= selectedUnits.Count;
-
-                    // Sort tiles: farthest from centroid first so "back-row"
-                    // units pathfind while "front-row" tiles are still passable.
-                    Array.Sort(tiles, (a, b) =>
-                    {
-                        float da = (a.X - cx) * (a.X - cx) + (a.Y - cy) * (a.Y - cy);
-                        float db = (b.X - cx) * (b.X - cx) + (b.Y - cy) * (b.Y - cy);
-                        return db.CompareTo(da); // descending
-                    });
-
-                    var assigned = new bool[selectedUnits.Count];
-                    _reservedTiles.Clear();
-
-                    for (int ti = 0; ti < tiles.Length; ti++)
-                    {
-                        var tile = tiles[ti];
-
-                        // Find closest unassigned unit (octile distance)
-                        int bestIdx = -1;
-                        int bestDist = int.MaxValue;
-                        for (int ui = 0; ui < selectedUnits.Count; ui++)
-                        {
-                            if (assigned[ui]) continue;
-                            var upos = CoordUtil.WorldToIso(selectedUnits[ui].WorldPosition);
-                            int d = Pathfinder.OctileDistance(upos, tile);
-                            if (d < bestDist) { bestDist = d; bestIdx = ui; }
-                        }
-
-                        if (bestIdx < 0) break; // shouldn't happen
-
-                        var unit = selectedUnits[bestIdx];
-                        assigned[bestIdx] = true;
-
-                        // Set attack target for all units when issuing attack
-                        unit.ClearOrders();              // reset old state first
+                        unit.ClearOrders();              // reset old path/attack state first
                         unit.AttackTargetId = attackTargetId; // set AFTER ClearOrders
-
-                        var start = CoordUtil.WorldToIso(unit.WorldPosition);
-                        var path = TryFindPath(start, tile);
-
-                        if (path != null)
-                        {
-                            unit.MoveTarget = CoordUtil.IsoToVisualCenter(tile);
-                            unit.Path = path;
-                            unit.PathIndex = 0;
-                            unit.ResetStuckTracking();
-                            _reservedTiles.Add(tile);
-                        }
-                        else if (start == tile)
-                        {
-                            unit.MoveTarget = CoordUtil.IsoToVisualCenter(tile);
-                            unit.Path = null;
-                            unit.PathIndex = 0;
-                            unit.ResetStuckTracking();
-                            _reservedTiles.Add(tile);
-                        }
-                        else
-                        {
-                            // Fallback: ring search (up to 5 tiles)
-                            IsoCoord? fallback = null;
-                            List<IsoCoord> fallbackPath = null;
-                            for (int ring = 1; ring <= 5; ring++)
-                            {
-                                for (int dx = -ring; dx <= ring; dx++)
-                                for (int dy = -ring; dy <= ring; dy++)
-                                {
-                                    if (Math.Abs(dx) < ring && Math.Abs(dy) < ring)
-                                        continue;
-                                    var ft = new IsoCoord(tile.X + dx, tile.Y + dy);
-                                    var fp = TryFindPath(start, ft);
-                                    if (fp != null)
-                                    {
-                                        fallback = ft;
-                                        fallbackPath = fp;
-                                        goto fallbackFound;
-                                    }
-                                }
-                            }
-                            fallbackFound:
-                            if (fallback.HasValue && fallbackPath != null)
-                            {
-                                unit.MoveTarget = CoordUtil.IsoToVisualCenter(fallback.Value);
-                                unit.Path = fallbackPath;
-                                unit.PathIndex = 0;
-                                unit.ResetStuckTracking();
-                                _reservedTiles.Add(fallback.Value);
-                            }
-                            // else: completely boxed in — unit stays put
-                        }
+                        AssignUnitPath(unit, targetTile);
                     }
-
-                    _reservedTiles.Clear();
+                    _activeGroupMovement = null;
                 }
                 skipCommand:;
             }
@@ -694,6 +597,10 @@ namespace FNARTS.Game
             // Production system tick
             _productionSystem.Update(dt, _entities, OnUnitSpawned);
 
+            // Tile occupancy arbitration — reserve next tiles BEFORE units
+            // consume their paths (OpenRA Mobile enter/exit-cell model).
+            _movement.Update(dt);
+
             // Entity updates + stuck detection
             foreach (var e in _entities.AllEntities)
             {
@@ -703,7 +610,9 @@ namespace FNARTS.Game
 
                     // Stuck detection: if unit has a path but isn't making progress,
                     // recompute after a timeout (max 3 recomputes per move order).
-                    if (unit.IsMoving && unit.Path != null)
+                    // Units waiting on arbitration handle themselves — exempt.
+                    if (unit.IsMoving && unit.Path != null
+                        && unit.WaitTimer <= 0f)
                     {
                         float moved = System.Numerics.Vector2.Distance(
                             unit.WorldPosition, unit.LastStuckCheckPos);
@@ -729,8 +638,30 @@ namespace FNARTS.Game
                 }
             }
 
-            // Separation — push nearby units apart to prevent overlap
-            ApplySeparation(dt);
+            // Group movement — advance formation centre independently,
+            // redirect all units to their formation slots each frame.
+            if (_activeGroupMovement != null)
+            {
+                var gm = _activeGroupMovement;
+
+                // Use the slowest unit's speed so stragglers aren't left behind
+                float slowestSpeed = float.MaxValue;
+                foreach (var u in gm.Units)
+                {
+                    if (u.IsAlive && u.Definition.MoveSpeed < slowestSpeed)
+                        slowestSpeed = u.Definition.MoveSpeed;
+                }
+                if (slowestSpeed == float.MaxValue) slowestSpeed = 100f;
+
+                gm.Update(dt, slowestSpeed);
+
+                if (gm.AllArrived)
+                {
+                    foreach (var u in gm.Units)
+                        u.ForcedMoveSpeed = null;
+                    _activeGroupMovement = null;
+                }
+            }
 
             // Debug toggle
             if (kb.IsKeyDown(Keys.F3) && _prevKb.IsKeyUp(Keys.F3))
@@ -776,7 +707,8 @@ namespace FNARTS.Game
                     _tileRenderer.DrawHighlights(_sb, _camera, tiles, tint);
                 }
 
-                _entityRenderer.Draw(_sb, _camera, _entities, _selection, null);  // fog disabled
+                _entityRenderer.Draw(_sb, _camera, _entities, _selection,
+                    _activeGroupMovement, null);  // fog disabled
 
                 // HP bars — drawn after entities so they're always on top
                 _hpBarRenderer.Draw(_sb, _camera, _entities);
@@ -913,37 +845,10 @@ namespace FNARTS.Game
         }
 
         /// <summary>
-        /// Compute and assign a path for a single unit to a world-space target.
-        /// </summary>
-        private void AssignUnitPath(Unit unit, System.Numerics.Vector2 targetWorldPos)
-        {
-            var start = CoordUtil.WorldToIso(unit.WorldPosition);
-            var end = CoordUtil.WorldToIso(targetWorldPos);
-            var path = _pathfinder.FindPath(start, end);
-
-            if (path.Count > 0)
-            {
-                unit.MoveTarget = targetWorldPos;
-                unit.Path = path;
-                unit.PathIndex = 0;
-                unit.ResetStuckTracking();
-            }
-            else if (start == end)
-            {
-                // Same tile — straight-line is safe (no intermediate obstacles).
-                unit.MoveTarget = targetWorldPos;
-                unit.Path = null;
-                unit.PathIndex = 0;
-                unit.ResetStuckTracking();
-            }
-            // else: unreachable (inside building, blocked, etc.) — don't move.
-        }
-
-        /// <summary>
         /// Compute and assign a path for a single unit to a specific tile centre
         /// (C&amp;C2 vehicle-style: one unit per tile, snapped to the tile centre).
         /// If the ideal tile is unreachable, searches nearby for the closest
-        /// reachable tile (up to 3 tiles away).
+        /// reachable tile (up to 5 tiles away).
         /// </summary>
         private void AssignUnitPath(Unit unit, IsoCoord targetTile)
         {
@@ -952,7 +857,7 @@ namespace FNARTS.Game
 
             if (path != null)
             {
-                unit.MoveTarget = CoordUtil.IsoToVisualCenter(targetTile);
+                unit.MoveTarget = CoordUtil.IsoToWorldCenter(targetTile);
                 unit.Path = path;
                 unit.PathIndex = 0;
                 unit.ResetStuckTracking();
@@ -961,7 +866,7 @@ namespace FNARTS.Game
 
             if (start == targetTile)
             {
-                unit.MoveTarget = CoordUtil.IsoToVisualCenter(targetTile);
+                unit.MoveTarget = CoordUtil.IsoToWorldCenter(targetTile);
                 unit.Path = null;
                 unit.PathIndex = 0;
                 unit.ResetStuckTracking();
@@ -981,7 +886,7 @@ namespace FNARTS.Game
                     path = TryFindPath(start, fallbackTile);
                     if (path != null)
                     {
-                        unit.MoveTarget = CoordUtil.IsoToVisualCenter(fallbackTile);
+                        unit.MoveTarget = CoordUtil.IsoToWorldCenter(fallbackTile);
                         unit.Path = path;
                         unit.PathIndex = 0;
                         unit.ResetStuckTracking();
@@ -1020,7 +925,7 @@ namespace FNARTS.Game
 
             if (start == targetTile)
             {
-                unit.MoveTarget = CoordUtil.IsoToVisualCenter(targetTile);
+                unit.MoveTarget = CoordUtil.IsoToWorldCenter(targetTile);
                 return;
             }
 
@@ -1047,7 +952,7 @@ namespace FNARTS.Game
                     var fp = TryFindPath(start, ft);
                     if (fp != null)
                     {
-                        unit.MoveTarget = CoordUtil.IsoToVisualCenter(ft);
+                        unit.MoveTarget = CoordUtil.IsoToWorldCenter(ft);
                         unit.Path = fp;
                         unit.PathIndex = 0;
                         unit.LastStuckCheckPos = unit.WorldPosition;
@@ -1061,34 +966,13 @@ namespace FNARTS.Game
         }
 
         /// <summary>
-        /// Apply local separation force to all alive units so they don't overlap.
+        /// Assign a move order to a formation group.
+        /// Every unit gets its own A* path so no one walks through buildings.
         /// </summary>
-        private void ApplySeparation(float dt)
+        private void AssignGroupMoveOrder(GroupMovement gm,
+            System.Numerics.Vector2 targetPos)
         {
-            // Collect ALL alive unit positions (stationary units act as repellers).
-            var allPositions = new System.Collections.Generic.List<System.Numerics.Vector2>();
-            var movingUnits = new System.Collections.Generic.List<Unit>();
-            foreach (var e in _entities.AllEntities)
-            {
-                if (e is Unit u && u.IsAlive)
-                {
-                    allPositions.Add(u.WorldPosition);
-                    if (u.IsMoving)
-                        movingUnits.Add(u);
-                }
-            }
-
-            if (allPositions.Count < 2 || movingUnits.Count == 0)
-                return;
-
-            // Only apply separation TO moving units — stationary units hold their tile.
-            // Moving units are repelled from ALL nearby units (moving or stationary).
-            foreach (var unit in movingUnits)
-            {
-                var separation = SeparationBehavior.Compute(
-                    unit.WorldPosition, allPositions);
-                unit.WorldPosition += separation * dt * 60f;  // normalise to 1/60s step
-            }
+            gm.IssueMoveOrder(targetPos, _pathfinder);
         }
 
         /// <summary>
@@ -1114,8 +998,22 @@ namespace FNARTS.Game
             // Remove from entity manager
             _entities.RemoveDead();
 
+            // A destroyed building frees its tiles — refresh pathfinding grids
+            if (entity is Building deadBuilding)
+                NotifyPathfinderOfBuilding(deadBuilding);
+
             GameLogger.Info($"Entity died: {entity.GetType().Name}#{entity.Id} " +
                 $"at ({entity.WorldPosition.X:F0},{entity.WorldPosition.Y:F0})");
+        }
+
+        /// <summary>
+        /// Notify the pathfinder that a building's occupied tiles changed
+        /// (placed or destroyed), so stale abstract-grid data is rebuilt.
+        /// </summary>
+        private void NotifyPathfinderOfBuilding(Building building)
+        {
+            foreach (var tile in building.GetOccupiedTiles())
+                _pathfinder.NotifyTerrainChanged(tile);
         }
 
         protected override void Dispose(bool disposing)

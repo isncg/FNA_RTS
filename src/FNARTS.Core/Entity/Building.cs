@@ -43,9 +43,12 @@ namespace FNARTS.Core
             int E = SizeX, N = SizeY, H = Height;
 
             // Building (0,0,0) in world space — matches constructor.
+            // Local (gx,gy,hz) projects as an offset from the placement
+            // origin's south vertex; the footprint centre (size/2, size/2, 0)
+            // maps to WorldPosition (= BuildingWorldOrigin).
             float ox = PlacementOrigin.X, oy = PlacementOrigin.Y;
-            float originWx = (ox - oy + 1) * CoordUtil.HALF_TILE_W;
-            float originWy = -(ox + oy) * CoordUtil.HALF_TILE_H + CoordUtil.TILE_HEIGHT;
+            float originWx = (ox - oy) * CoordUtil.HALF_TILE_W;
+            float originWy = -(ox + oy) * CoordUtil.HALF_TILE_H;
 
             // Solve the isometric projection for local (gx, gy, hz).
             //   wx = originWx + (gx - gy) * HALF_W
@@ -93,24 +96,23 @@ namespace FNARTS.Core
         }
 
         /// <summary>Return all grid coordinates occupied by this building.
-        /// Includes one extra row south (gy-1) for the south-wall footprint.</summary>
+        /// Exact footprint only (C&amp;C2 style: one tile per grid cell).</summary>
         public IsoCoord[] GetOccupiedTiles()
         {
-            var tiles = new IsoCoord[SizeX * (SizeY + 1)];
+            var tiles = new IsoCoord[SizeX * SizeY];
             int i = 0;
             for (int x = 0; x < SizeX; x++)
-            for (int y = -1; y < SizeY; y++)
+            for (int y = 0; y < SizeY; y++)
                 tiles[i++] = new IsoCoord(PlacementOrigin.X + x, PlacementOrigin.Y + y);
             return tiles;
         }
 
-        /// <summary>Check if building occupies a given tile.
-        /// Extends one tile south (gy-1) for the south-wall visual footprint.</summary>
+        /// <summary>Check if building occupies a given tile (exact footprint).</summary>
         public bool OccupiesTile(IsoCoord coord)
         {
             return coord.X >= PlacementOrigin.X &&
                    coord.X < PlacementOrigin.X + SizeX &&
-                   coord.Y >= PlacementOrigin.Y - 1 &&   // south wall
+                   coord.Y >= PlacementOrigin.Y &&
                    coord.Y < PlacementOrigin.Y + SizeY;
         }
     }

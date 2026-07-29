@@ -18,7 +18,9 @@ namespace FNARTS.Core
         public const float HALF_TILE_W = TILE_WIDTH / 2f;
         public const float HALF_TILE_H = TILE_HEIGHT / 2f;
 
-        /// <summary>Grid coordinate to world position (tile top-left corner of bounding box).</summary>
+        /// <summary>Grid coordinate to world position — the SOUTH vertex of the
+        /// tile diamond (continuous grid point (gx, gy)).  This is the anchor
+        /// of the world↔grid projection; see WorldToIso for the inverse.</summary>
         public static Vector2 IsoToWorld(IsoCoord coord)
         {
             return new Vector2(
@@ -69,33 +71,31 @@ namespace FNARTS.Core
         }
 
         /// <summary>
-        /// World-space position for a building's anchor point (sprite bottom-centre).
-        /// Replaces the duplicated tile-SW-corner + corner-offset math that was
-        /// inlined in both Building's constructor and EntityRenderer.DrawGhost.
+        /// World-space anchor (sprite top-left) for drawing the 64×32 diamond
+        /// sprite of a tile so that it covers exactly the logical diamond of
+        /// that tile: drawn centre == IsoToWorldCenter, and WorldToIso of any
+        /// point inside the sprite resolves back to the tile.  Used by the
+        /// tile / fog / highlight renderers.
         /// </summary>
-        public static Vector2 BuildingWorldOrigin(IsoCoord placement, int sizeX, int sizeY)
+        public static Vector2 TileDrawOrigin(IsoCoord coord)
         {
-            float ox = placement.X, oy = placement.Y;
-            float tileSW_wx = (ox - oy + 1) * HALF_TILE_W;
-            float tileSW_wy = -(ox + oy) * HALF_TILE_H + TILE_HEIGHT;
-            float off_wx = (sizeY - sizeX) * HALF_TILE_W / 2f;
-            float off_wy = (sizeX + sizeY) * HALF_TILE_H / 2f;
-            return new Vector2(tileSW_wx - off_wx, tileSW_wy - off_wy);
+            return IsoToWorld(coord) - new Vector2(HALF_TILE_W, TILE_HEIGHT);
         }
 
         /// <summary>
-        /// World-space visual centre of the tile diamond — the point where a
-        /// 1×1 building sits.  Equals IsoToWorldCenter + (32, 32).
-        /// Note: WorldToIso of this point returns (gx, gy-1), i.e. one tile
-        /// south, because the diamond centre sits on the tile's southern edge
-        /// in grid space.  That is harmless for the final idle position; the
-        /// pathfinder will use this position as the start for the next move
-        /// and route correctly from there.
+        /// World-space position for a building's anchor point — the centre of
+        /// its footprint in continuous grid space (placement + size/2), which
+        /// is where the sprite is drawn centred.  With the render plane
+        /// aligned to the logical grid this is simply the projection of the
+        /// footprint centre.
         /// </summary>
-        public static Vector2 IsoToVisualCenter(IsoCoord coord)
+        public static Vector2 BuildingWorldOrigin(IsoCoord placement, int sizeX, int sizeY)
         {
-            return IsoToWorldCenter(coord) + new Vector2(
-                TILE_WIDTH / 2f, TILE_HEIGHT);
+            float cgx = placement.X + sizeX / 2f;
+            float cgy = placement.Y + sizeY / 2f;
+            return new Vector2(
+                (cgx - cgy) * HALF_TILE_W,
+                -(cgx + cgy) * HALF_TILE_H);
         }
     }
 }

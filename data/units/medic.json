@@ -12,5 +12,6 @@
   "visionRange": 5,
   "costCredits": 200,
   "healAmount": 15,
-  "healRange": 96.0
+  "healRange": 96.0,
+  "collisionRadius": 14.0
 }

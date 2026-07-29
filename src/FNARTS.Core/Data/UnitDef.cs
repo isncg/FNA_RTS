@@ -25,5 +25,15 @@ namespace FNARTS.Core
         public float HealRange { get; set; } = 0f;
         public bool IsAircraft { get; set; } = false;
         public bool CanHitAir { get; set; } = false;
+
+        // Phase 3 SC1-style steering parameters
+        public float Acceleration { get; set; } = 400f;       // px/s^2
+        public float Deceleration { get; set; } = 300f;       // px/s^2
+        public float MaxForce { get; set; } = 600f;           // max steering force magnitude
+        public float Mass { get; set; } = 1f;                 // for F=ma
+
+        /// <summary>Collision radius in world pixels. Two units should stay
+        /// at least radiusA + radiusB apart.</summary>
+        public float CollisionRadius { get; set; } = 16f;
     }
 }
