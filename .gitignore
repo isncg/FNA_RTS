@@ -27,3 +27,4 @@ Thumbs.db
 # Misc
 *.pidb
 **/imgui.ini
+tools/*.png

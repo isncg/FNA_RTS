@@ -211,5 +211,90 @@ namespace FNARTS.Core.Tests.Entity
             var unit = new Unit(def) { WorldPosition = Vector2.Zero };
             Assert.False(unit.IsMoving);
         }
+
+        // ── Vehicle turret control ────────────────────────────────────
+
+        [Fact]
+        public void Vehicle_Idle_TurretOffsetEasesToZero()
+        {
+            var unit = new Unit(DefaultDef())
+            {
+                WorldPosition = Vector2.Zero,
+                IsVehicle = true,
+                BodyRotation = 0f,
+                TurretRotation = 1.0f,
+                TurretOffset = 1.0f,
+            };
+
+            for (int i = 0; i < 60; i++)
+                unit.Update(1f / 60f);
+
+            Assert.Equal(0f, unit.TurretOffset, 3);
+            Assert.Equal(unit.BodyRotation, unit.TurretRotation, 3);
+        }
+
+        [Fact]
+        public void Vehicle_Idle_BodyTurnCarriesTurret_Rigidly()
+        {
+            var unit = new Unit(DefaultDef())
+            {
+                WorldPosition = Vector2.Zero,
+                IsVehicle = true,
+                BodyRotation = 0f,
+                TurretRotation = 0f,
+                TurretOffset = 0f,
+            };
+            unit.Update(1f / 60f);
+
+            // Body slewed externally (renderer-independent simulation of a turn)
+            unit.BodyRotation = 1.5f;
+            unit.Update(1f / 60f);
+
+            // Turret must follow the body without lag (offset stays 0)
+            Assert.Equal(0f, unit.TurretOffset, 3);
+            Assert.Equal(1.5f, unit.TurretRotation, 3);
+        }
+
+        [Fact]
+        public void Vehicle_Attacking_CoreDoesNotDriveTurret()
+        {
+            var unit = new Unit(DefaultDef())
+            {
+                WorldPosition = Vector2.Zero,
+                IsVehicle = true,
+                BodyRotation = 0f,
+                TurretRotation = 2.0f,
+            };
+            unit.AttackTargetId = 42;
+
+            unit.Update(1f / 60f);
+
+            // Absolute angle is owned by the Game layer while attacking;
+            // Core only mirrors the relative offset for a seamless hand-back.
+            Assert.Equal(2.0f, unit.TurretRotation, 3);
+            Assert.Equal(2.0f, unit.TurretOffset, 3);
+        }
+
+        [Fact]
+        public void Vehicle_TargetLost_TurretRecentresWithoutSnap()
+        {
+            var unit = new Unit(DefaultDef())
+            {
+                WorldPosition = Vector2.Zero,
+                IsVehicle = true,
+                BodyRotation = 0f,
+                TurretRotation = 2.0f,
+            };
+            unit.AttackTargetId = 42;
+            unit.Update(1f / 60f);      // offset mirrors the aim angle (2.0)
+            unit.AttackTargetId = null; // target lost
+
+            unit.Update(1f / 60f);
+
+            // Offset eases toward 0 at a bounded rate — no instant snap
+            Assert.True(unit.TurretOffset < 2.0f);
+            Assert.True(unit.TurretOffset > 1.0f);
+            Assert.Equal(unit.TurretOffset, unit.TurretRotation, 3);
+        }
     }
 }

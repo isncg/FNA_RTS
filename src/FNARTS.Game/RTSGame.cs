@@ -4,6 +4,7 @@ using System.IO;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
+using FNARTS.Game.Render;
 using FNARTS.Core;
 using FNARTS.Core.Combat;
 using FNARTS.Core.Config;
@@ -57,6 +58,7 @@ namespace FNARTS.Game
         private VictorySystem _victorySystem;
         private VictoryState _victoryState = VictoryState.Ongoing;
         private GroupMovement? _activeGroupMovement;
+        private VehicleRenderer _vehicleRenderer;
 
         // Placement mode
         private List<BuildingDef> _availableBuildings;
@@ -66,12 +68,32 @@ namespace FNARTS.Game
         private IsoCoord _placementGrid;         // mouse-snapped grid position
         private bool _placementValid;            // current position validity
         private KeyboardState _prevKb;
+        private float _autoShotTimer = -1f;
+        private float _debugZoom = 1f;
+        private bool _debugZoomApplied;
+        private int _fireOnMoveFrame = -1;
 
         public RTSGame(bool headless, bool debugRender, string mapName)
         {
             Instance = this;
             _headless = headless;
             _mapName = mapName;
+
+            // Headless screenshot mode: FNA_SCREENSHOT=<delay seconds>
+            var shotEnv = Environment.GetEnvironmentVariable("FNA_SCREENSHOT");
+            if (float.TryParse(shotEnv, out float shotDelay) && shotDelay > 0f)
+                _autoShotTimer = shotDelay;
+
+            // Optional zoom + centre-on-vehicle for close-up screenshots
+            var zoomEnv = Environment.GetEnvironmentVariable("FNA_ZOOM");
+            if (float.TryParse(zoomEnv, out float zoom) && zoom > 1f)
+                _debugZoom = zoom;
+
+            // Fire-on-the-move verification: issue a move order to the
+            // attacking player tank at the given frame number.
+            var fomEnv = Environment.GetEnvironmentVariable("FNA_FIRE_ON_MOVE");
+            if (int.TryParse(fomEnv, out int fomFrame) && fomFrame > 0)
+                _fireOnMoveFrame = fomFrame;
 
             _gdm = new GraphicsDeviceManager(this);
             _gdm.PreferredBackBufferWidth = 1280;
@@ -277,37 +299,17 @@ namespace FNARTS.Game
                 _entities.AddEntity(b);
             }
 
-            // A few player workers + a tank (faction 0)
-            var workerDef = _config.GetUnit("worker");
-            for (int i = 0; i < 3; i++)
-            {
-                var unit = new Unit(workerDef);
-                unit.WorldPosition = CoordUtil.IsoToWorldCenter(
-                    new IsoCoord(S + 3 + i, S + 1));
-                _entities.AddEntity(unit);
-            }
-            // Add a tank so combat damage is visible
+            // Vehicle display test: a single tank (faction 0), rendered as 3D.
+            // Non-vehicle units (workers/soldiers) are temporarily disabled.
             var tankDef = _config.GetUnit("tank");
             var playerTank = new Unit(tankDef)
             {
-                WorldPosition = CoordUtil.IsoToWorldCenter(new IsoCoord(S + 7, S + 1))
+                WorldPosition = CoordUtil.IsoToWorldCenter(new IsoCoord(S + 7, S + 1)),
+                IsVehicle = true
             };
             _entities.AddEntity(playerTank);
 
-            // ── Enemy units (faction 1) for testing combat ──────────
-            var soldierDef = _config.GetUnit("soldier");
-            for (int i = 0; i < 3; i++)
-            {
-                var enemy = new Unit(soldierDef)
-                {
-                    Faction = 1,
-                    WorldPosition = CoordUtil.IsoToWorldCenter(
-                        new IsoCoord(S + 12 + i, S + 5))
-                };
-                _entities.AddEntity(enemy);
-            }
-
-            // Enemy building (faction 1) as a static target
+            // Enemy building (faction 1) as a static target for turret tracking
             var enemyBldDef = new BuildingDef
             {
                 Id = "enemy_outpost", Name = "Enemy Outpost",
@@ -320,19 +322,35 @@ namespace FNARTS.Game
             };
             _entities.AddEntity(enemyBld);
 
+            // Enemy tank (faction 1) inside the player tank's attack range
+            // (~3.6 tiles = 128 world units): the player tank holds position
+            // and its turret tracks the hostile unit, verifying attack-mode
+            // turret rotation independent of hull yaw. The enemy retaliates,
+            // so both 3D turrets track each other.
+            var enemyTank = new Unit(tankDef)
+            {
+                WorldPosition = CoordUtil.IsoToWorldCenter(new IsoCoord(S + 9, S + 2)),
+                Faction = 1,
+                IsVehicle = true
+            };
+            _entities.AddEntity(enemyTank);
+            playerTank.AttackTargetId = enemyTank.Id;
+
             GameLogger.Info($"Created {_entities.AllEntities.Count} entities " +
-                $"({specs.Length + 1} buildings, 5 friendlies + 3 enemies)");
+                $"({specs.Length + 1} buildings, 2 vehicles)");
         }
 
         protected override void LoadContent()
         {
             _sb = new SpriteBatch(GraphicsDevice);
-            _assets = new ProceduralAssetProvider(GraphicsDevice);
+            _assets = new FileAssetProvider(GraphicsDevice,
+                            Path.Combine(AppContext.BaseDirectory, "data"));
             _tileRenderer = new TileRenderer(_map, _assets);
             _entityRenderer = new EntityRenderer(_assets);
             _selectionRenderer = new SelectionRenderer(_assets);
             _hpBarRenderer = new HpBarRenderer(_assets);
             _fogRenderer = new FogRenderer(_assets);
+            _vehicleRenderer = new VehicleRenderer(GraphicsDevice);
             _commandPanel = new CommandPanel(GraphicsDevice);
             GameLogger.Info("Content loaded");
         }
@@ -342,7 +360,12 @@ namespace FNARTS.Game
             float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
             _frameCount++;
 
-            if (_headless && _frameCount > 10) Exit();
+            // Headless smoke test exits quickly — unless an auto-screenshot
+            // (FNA_SCREENSHOT) is pending, which needs time to fire, or the
+            // fire-on-the-move script still needs frames to play out.
+            if (_headless && _autoShotTimer <= 0f && _frameCount > 10 &&
+                (_fireOnMoveFrame <= 0 || _frameCount > _fireOnMoveFrame + 360))
+                Exit();
 
             _input.Update();
 
@@ -533,51 +556,19 @@ namespace FNARTS.Game
             {
                 var worldPosN = _camera.ScreenToWorld(_input.MouseScreenPos).ToNumerics();
                 var cmd = _commands.ProcessRightClick(worldPosN, _entities, _selection);
-                if (cmd == null) goto skipCommand;
+                if (cmd != null)
+                    ApplyPlayerCommand(cmd);
+            }
 
-                // Collect selected units
-                var selectedUnits = new System.Collections.Generic.List<Unit>();
-                foreach (var id in _selection.SelectedEntityIds)
-                {
-                    if (_entities.GetEntity(id) is Unit u)
-                        selectedUnits.Add(u);
-                }
-
-                // Extract target position and attack info from the concrete type
-                System.Numerics.Vector2 targetPos;
-                uint? attackTargetId = null;
-                if (cmd is AttackCommand atkCmd)
-                {
-                    targetPos = atkCmd.TargetWorldPosition;
-                    attackTargetId = atkCmd.TargetEntityId;
-                }
-                else if (cmd is MoveCommand moveCmd)
-                {
-                    targetPos = moveCmd.TargetWorldPosition;
-                }
-                else
-                {
-                    goto skipCommand;
-                }
-
-                if (selectedUnits.Count >= 1)
-                {
-                    // ── Formation movement is OFF by default (RA1
-                    //     FormMove=false semantics): every unit gets the
-                    //     SAME target tile and pathfinds to it independently;
-                    //     MovementSystem arbitration spreads them onto free
-                    //     tiles around it. GroupMovement stays dormant until
-                    //     Ctrl+groups + formation toggle are implemented. ──
-                    var targetTile = CoordUtil.WorldToIso(targetPos);
-                    foreach (var unit in selectedUnits)
-                    {
-                        unit.ClearOrders();              // reset old path/attack state first
-                        unit.AttackTargetId = attackTargetId; // set AFTER ClearOrders
-                        AssignUnitPath(unit, targetTile);
-                    }
-                    _activeGroupMovement = null;
-                }
-                skipCommand:;
+            // Headless fire-on-the-move verification (FNA_FIRE_ON_MOVE=<frame>):
+            // issue a move order to the attacking player tank, then log the
+            // attack state periodically while it drives away.
+            if (_fireOnMoveFrame > 0)
+            {
+                if (_frameCount == _fireOnMoveFrame)
+                    RunFireOnMoveScript();
+                else if (_frameCount > _fireOnMoveFrame && _frameCount % 60 == 0)
+                    LogFireOnMoveState();
             }
 
             // Pause
@@ -586,6 +577,9 @@ namespace FNARTS.Game
 
             // Combat system — attack resolution + auto-pursuit
             _combatSystem.Update(dt, _entities, _pathfinder, OnEntityDeath);
+
+            // Update vehicle turret tracking (precise target following)
+            UpdateVehicleTurretTracking(dt);
 
             // Fog of war update — disabled for now (F4 to reveal all)
             // _fogOfWar.Update(_entities, 0);
@@ -671,6 +665,30 @@ namespace FNARTS.Game
                 _fogOfWar.RevealAll();
                 GameLogger.Info("Fog of war: reveal all (F4)");
             }
+            if (kb.IsKeyDown(Keys.F8) && _prevKb.IsKeyUp(Keys.F8))
+                SaveScreenshot();
+
+            // Headless auto-screenshot (FNA_SCREENSHOT=<delay seconds>)
+            if (_autoShotTimer > 0f)
+            {
+                _autoShotTimer -= dt;
+                if (_autoShotTimer <= 0f)
+                {
+                    if (_debugZoom > 1f && !_debugZoomApplied)
+                    {
+                        ApplyDebugZoom();
+                        _debugZoomApplied = true;
+                        // Let one frame re-render with the new camera —
+                        // the screenshot reads the previous frame's buffer.
+                        _autoShotTimer = 0.2f;
+                    }
+                    else
+                    {
+                        SaveScreenshot();
+                        Exit();
+                    }
+                }
+            }
 
             _prevKb = kb;
         }
@@ -682,9 +700,119 @@ namespace FNARTS.Game
             _placementValid = CanPlaceBuilding(_placementDef, _placementGrid);
         }
 
+        /// <summary>
+        /// Centre the camera on the first vehicle and apply FNA_ZOOM
+        /// (headless close-up screenshots). Called just before capture.
+        /// </summary>
+        private void ApplyDebugZoom()
+        {
+            foreach (var e in _entities.AllEntities)
+            {
+                if (e is Unit u && u.IsAlive && u.IsVehicle)
+                {
+                    _camera.Position = e.WorldPosition.ToXna();
+                    break;
+                }
+            }
+            _camera.Zoom = _debugZoom;
+            _camera.RebuildMatrices();
+        }
+
+        /// <summary>Get all alive vehicle units for 3D rendering.</summary>
+        private System.Collections.Generic.List<Unit> GetVehicles()
+        {
+            var list = new System.Collections.Generic.List<Unit>();
+            foreach (var e in _entities.AllEntities)
+            {
+                if (e is Unit u && u.IsAlive && u.IsVehicle)
+                    list.Add(u);
+            }
+            return list;
+        }
+
+        /// <summary>Save a PNG screenshot of the backbuffer (F8).</summary>
+        private void SaveScreenshot()
+        {
+            try
+            {
+                int w = GraphicsDevice.PresentationParameters.BackBufferWidth;
+                int h = GraphicsDevice.PresentationParameters.BackBufferHeight;
+                var pixels = new int[w * h];
+                GraphicsDevice.GetBackBufferData(pixels);
+                using var tex = new Texture2D(GraphicsDevice, w, h);
+                tex.SetData(pixels);
+                string path = Path.Combine(AppContext.BaseDirectory,
+                    $"screenshot_{DateTime.Now:yyyyMMdd_HHmmss}.png");
+                using var fs = File.Create(path);
+                tex.SaveAsPng(fs, w, h);
+                GameLogger.Info($"Screenshot saved: {path}");
+            }
+            catch (Exception ex)
+            {
+                GameLogger.Error($"Screenshot failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Update turret rotation for vehicle units: track the attack target
+        /// position precisely. Runs in the Game layer where EntityManager is
+        /// available. The bearing is recomputed from the CURRENT positions of
+        /// shooter and target every frame, so it stays correct for
+        /// still-vs-moving, moving-vs-still and moving-vs-moving targets.
+        /// The turret slew rate is far higher than the hull turn rate.
+        /// </summary>
+        private const float TURRET_TURN_RATE = 24f; // rad/s — ≫ hull (8 rad/s)
+
+        private void UpdateVehicleTurretTracking(float dt)
+        {
+            foreach (var e in _entities.AllEntities)
+            {
+                if (e is Unit u && u.IsAlive && u.IsVehicle)
+                {
+                    if (u.AttackTargetId.HasValue)
+                    {
+                        var target = _entities.GetEntity(u.AttackTargetId.Value);
+                        if (target != null && target.IsAlive)
+                        {
+                            // Angle must be in grid space (X=east, Y=north) to
+                            // match VehicleRenderer's rotation convention.
+                            var worldDir = target.WorldPosition - u.WorldPosition;
+                            var gridDir = CoordUtil.WorldToIsoFloat(worldDir);
+                            float targetAngle = MathF.Atan2(gridDir.Y, gridDir.X);
+                            u.TurretRotation = LerpAngle(u.TurretRotation,
+                                targetAngle, TURRET_TURN_RATE * dt);
+                        }
+                    }
+                    // If no target, Unit.Update() drives the turret via its
+                    // relative offset (eases to 0, rides with the body).
+                }
+            }
+        }
+
+        /// <summary>
+        /// Smoothly interpolate current angle toward target angle,
+        /// handling the -π/π wrap-around.
+        /// </summary>
+        private static float LerpAngle(float current, float target, float speed)
+        {
+            float diff = target - current;
+            while (diff > MathF.PI) diff -= MathF.PI * 2f;
+            while (diff < -MathF.PI) diff += MathF.PI * 2f;
+
+            float maxStep = speed;
+            if (MathF.Abs(diff) <= maxStep)
+                return target;
+
+            return current + Math.Sign(diff) * maxStep;
+        }
+
         protected override void Draw(GameTime gameTime)
         {
-            GraphicsDevice.Clear(new Color(20, 20, 30));
+            // Clear colour AND depth — the vehicle 3D pass relies on a
+            // depth buffer reset to 1.0 every frame.
+            GraphicsDevice.Clear(
+                ClearOptions.Target | ClearOptions.DepthBuffer,
+                new Color(20, 20, 30), 1.0f, 0);
 
             if (_state == GameState.Playing || _state == GameState.Paused)
             {
@@ -707,8 +835,13 @@ namespace FNARTS.Game
                     _tileRenderer.DrawHighlights(_sb, _camera, tiles, tint);
                 }
 
+                // 3D vehicles are interleaved into the sprite pass by iso
+                // depth — SpriteBatch ignores the depth buffer, so a vehicle
+                // drawn in a separate 3D pass would be overdrawn by any
+                // building sprite rendered after it.
                 _entityRenderer.Draw(_sb, _camera, _entities, _selection,
-                    _activeGroupMovement, null);  // fog disabled
+                    _activeGroupMovement, null,   // fog disabled
+                    GetVehicles(), v => _vehicleRenderer.DrawSingle(_camera, v));
 
                 // HP bars — drawn after entities so they're always on top
                 _hpBarRenderer.Draw(_sb, _camera, _entities);
@@ -842,6 +975,141 @@ namespace FNARTS.Game
             if (!_map.InBounds(gx, gy)) return false;
             if (!_map.IsPassable(new IsoCoord(gx, gy))) return false;
             return _entities.IsAreaFree(new IsoCoord(gx, gy), 1, 1);
+        }
+
+        /// <summary>
+        /// Apply a player command (move/attack) to the current selection.
+        /// Shared by right-click input and the headless test hooks.
+        /// </summary>
+        private void ApplyPlayerCommand(Command cmd)
+        {
+            // Collect selected units
+            var selectedUnits = new System.Collections.Generic.List<Unit>();
+            foreach (var id in _selection.SelectedEntityIds)
+            {
+                if (_entities.GetEntity(id) is Unit u)
+                    selectedUnits.Add(u);
+            }
+
+            // Extract target position and attack info from the concrete type
+            System.Numerics.Vector2 targetPos;
+            uint? attackTargetId = null;
+            if (cmd is AttackCommand atkCmd)
+            {
+                targetPos = atkCmd.TargetWorldPosition;
+                attackTargetId = atkCmd.TargetEntityId;
+            }
+            else if (cmd is MoveCommand moveCmd)
+            {
+                targetPos = moveCmd.TargetWorldPosition;
+            }
+            else
+            {
+                return;
+            }
+
+            if (selectedUnits.Count >= 1)
+            {
+                // ── Formation movement is OFF by default (RA1
+                //     FormMove=false semantics): every unit gets the
+                //     SAME target tile and pathfinds to it independently;
+                //     MovementSystem arbitration spreads them onto free
+                //     tiles around it. GroupMovement stays dormant until
+                //     Ctrl+groups + formation toggle are implemented. ──
+                var targetTile = CoordUtil.WorldToIso(targetPos);
+                foreach (var unit in selectedUnits)
+                {
+                    // Fire-on-the-move (vehicles only): a move order issued
+                    // while attacking keeps the attack target — the vehicle
+                    // fires while driving and drops the attack only when the
+                    // target leaves range (see CombatSystem).
+                    uint? keepAttack = cmd is MoveCommand && unit.IsVehicle
+                        ? unit.AttackTargetId : null;
+                    unit.ClearOrders();              // reset old path/attack state first
+                    unit.AttackTargetId = attackTargetId ?? keepAttack; // set AFTER ClearOrders
+                    unit.MoveWhileAttacking = keepAttack.HasValue;
+                    AssignUnitPath(unit, targetTile);
+                }
+                _activeGroupMovement = null;
+            }
+        }
+
+        /// <summary>
+        /// Headless fire-on-the-move script: select the attacking player
+        /// tank and order it to drive AWAY from its target, so the tank
+        /// must keep firing while in range and release the attack once it
+        /// leaves range.
+        /// </summary>
+        private void RunFireOnMoveScript()
+        {
+            Unit tank = null, enemy = null;
+            foreach (var e in _entities.AllEntities)
+            {
+                if (e is Unit u && u.IsAlive && u.IsVehicle)
+                {
+                    if (u.Faction == 0) tank = u;
+                    else enemy ??= u;
+                }
+            }
+            if (tank == null || enemy == null || !tank.AttackTargetId.HasValue)
+            {
+                GameLogger.Error("[fire-on-move] script preconditions not met");
+                return;
+            }
+
+            // Drive AWAY from the enemy along the grid axis. Probe for the
+            // farthest reachable tile (inside the playable diamond, on grass)
+            // so pathfinding succeeds and the tank must leave attack range.
+            var from = CoordUtil.WorldToIso(tank.WorldPosition);
+            var foe = CoordUtil.WorldToIso(enemy.WorldPosition);
+            var dirAway = System.Numerics.Vector2.Normalize(
+                new System.Numerics.Vector2(from.X - foe.X, from.Y - foe.Y));
+            IsoCoord destTile = from;
+            for (int k = 8; k >= 3; k--)
+            {
+                var cand = new IsoCoord(
+                    from.X + (int)MathF.Round(dirAway.X * k),
+                    from.Y + (int)MathF.Round(dirAway.Y * k));
+                if (InPlayableDiamond(cand.X, cand.Y) &&
+                    _map.GetTile(cand).Type == TileType.Grass)
+                {
+                    destTile = cand;
+                    break;
+                }
+            }
+            var dest = CoordUtil.IsoToWorldCenter(destTile);
+
+            _selection.ClearSelection();
+            _selection.Select(tank, false);
+            ApplyPlayerCommand(new MoveCommand(dest));
+
+            GameLogger.Info($"[fire-on-move] frame {_frameCount}: move order issued — " +
+                $"attack kept={tank.AttackTargetId.HasValue}, " +
+                $"fire-on-move flag={tank.MoveWhileAttacking}, " +
+                $"dest tile={destTile}, " +
+                $"path={(tank.Path == null ? "null" : tank.Path.Count.ToString())}");
+        }
+
+        /// <summary>Periodic state log for the fire-on-the-move script.</summary>
+        private void LogFireOnMoveState()
+        {
+            Unit tank = null, enemy = null;
+            foreach (var e in _entities.AllEntities)
+            {
+                if (e is Unit u && u.IsAlive && u.IsVehicle)
+                {
+                    if (u.Faction == 0) tank = u;
+                    else enemy ??= u;
+                }
+            }
+            if (tank == null || enemy == null) return;
+
+            float dist = System.Numerics.Vector2.Distance(
+                tank.WorldPosition, enemy.WorldPosition);
+            GameLogger.Info($"[fire-on-move] frame {_frameCount}: " +
+                $"attacking={tank.AttackTargetId.HasValue}, " +
+                $"flag={tank.MoveWhileAttacking}, moving={tank.IsMoving}, " +
+                $"dist={dist:F0} (range {tank.AttackRange:F0})");
         }
 
         /// <summary>

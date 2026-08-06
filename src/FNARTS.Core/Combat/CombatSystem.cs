@@ -71,6 +71,7 @@ namespace FNARTS.Core.Combat
             if (target == null || !target.IsAlive)
             {
                 attacker.AttackTargetId = null;
+                attacker.MoveWhileAttacking = false;
                 return;
             }
 
@@ -79,6 +80,7 @@ namespace FNARTS.Core.Combat
                 && !attacker.CanHitAir)
             {
                 attacker.AttackTargetId = null;
+                attacker.MoveWhileAttacking = false;
                 return;
             }
 
@@ -86,10 +88,24 @@ namespace FNARTS.Core.Combat
 
             if (dist <= attacker.AttackRange)
             {
-                // Stop movement when in attack range (prevents sliding past target)
-                attacker.Velocity = System.Numerics.Vector2.Zero;
-                attacker.Path = null;
-                attacker.PathIndex = 0;
+                // Fire-on-the-move: a vehicle executing a player move order
+                // keeps moving and fires on the move; every other attacker
+                // stops to shoot.
+                bool fireOnMove = attacker.IsVehicle && attacker.MoveWhileAttacking;
+                if (fireOnMove && !attacker.IsMoving)
+                {
+                    // Destination reached — resume normal stop-and-fire.
+                    attacker.MoveWhileAttacking = false;
+                    fireOnMove = false;
+                }
+
+                if (!fireOnMove)
+                {
+                    // Stop movement when in attack range (prevents sliding past target)
+                    attacker.Velocity = System.Numerics.Vector2.Zero;
+                    attacker.Path = null;
+                    attacker.PathIndex = 0;
+                }
 
                 if (attacker.CanAttack)
                 {
@@ -102,7 +118,18 @@ namespace FNARTS.Core.Combat
             }
             else
             {
-                AutoPursuit(attacker, target, pathfinder);
+                // A vehicle executing a move order disengages once the target
+                // leaves range (attack drops, movement continues); all other
+                // attackers auto-pursue.
+                if (attacker.IsVehicle && attacker.MoveWhileAttacking)
+                {
+                    attacker.AttackTargetId = null;
+                    attacker.MoveWhileAttacking = false;
+                }
+                else
+                {
+                    AutoPursuit(attacker, target, pathfinder);
+                }
             }
         }
 

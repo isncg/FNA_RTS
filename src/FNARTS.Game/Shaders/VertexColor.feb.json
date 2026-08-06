@@ -1,0 +1,15 @@
+{
+  "techniques": [
+    {
+      "name": "VertexColor",
+      "passes": [
+        {
+          "name": "P0",
+          "vertexShader": {"source": "VertexColor.hlsl", "entry": "VSMain"},
+          "pixelShader":  {"source": "VertexColor.hlsl", "entry": "PSMain"}
+        }
+      ]
+    }
+  ],
+  "parameters": []
+}

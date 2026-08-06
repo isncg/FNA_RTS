@@ -13,4 +13,14 @@
     <Content Include="..\..\data\**\*" CopyToOutputDirectory="PreserveNewest"
              Link="data\%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Shaders/VertexColor.feb">
+      <LogicalName>FNARTS.Game.Shaders.VertexColor.feb</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+  <Target Name="BuildFEB" BeforeTargets="BeforeBuild">
+    <Exec Command="python3 &quot;$(FNA_TOOLS_DIR)/feb_builder.py&quot; VertexColor.feb.json"
+          WorkingDirectory="$(MSBuildProjectDirectory)/Shaders"
+          Condition="Exists('$(FNA_TOOLS_DIR)/feb_builder.py')" />
+  </Target>
 </Project>

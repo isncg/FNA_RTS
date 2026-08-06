@@ -303,5 +303,148 @@ namespace FNARTS.Core.Tests.Combat
             Assert.Null(attacker.AttackTargetId);
             Assert.Empty(deaths);
         }
+
+        // ── Fire-on-the-move (vehicles) ──────────────────────────────
+
+        private static Unit MakeFireOnMoveVehicle(Vector2 pos, float range = 96f)
+        {
+            var def = new UnitDef { Id = "tank", MoveSpeed = 50f, HP = 200,
+                AttackDamage = 20, AttackRange = range, AttackCooldown = 1.0f, Armor = 0 };
+            return new Unit(def)
+            {
+                WorldPosition = pos,
+                IsVehicle = true,
+                MoveWhileAttacking = true,
+            };
+        }
+
+        [Fact]
+        public void FireOnMove_VehicleKeepsPathAndFiresWhileInRange()
+        {
+            var attacker = MakeFireOnMoveVehicle(new Vector2(0, 0));
+            var target = MakeUnit(50, 0); // within 96 range
+            attacker.AttackTargetId = target.Id;
+            var movePath = new List<IsoCoord> { new IsoCoord(5, 0), new IsoCoord(8, 0) };
+            attacker.Path = movePath;
+            attacker.PathIndex = 0;
+
+            var (mgr, pf, deaths) = Setup();
+            mgr.AddEntity(attacker);
+            mgr.AddEntity(target);
+
+            new CombatSystem().Update(1f / 60f, mgr, pf, e => deaths.Add(e));
+
+            // Kept moving orders AND fired
+            Assert.Same(movePath, attacker.Path);
+            Assert.True(attacker.AttackTargetId.HasValue);
+            Assert.True(target.CurrentHP < target.MaxHP);
+        }
+
+        [Fact]
+        public void FireOnMove_StopAndFireStillAppliesWithoutFlag()
+        {
+            // Same scenario but no move order active: vehicle stops to shoot.
+            var attacker = MakeFireOnMoveVehicle(new Vector2(0, 0));
+            attacker.MoveWhileAttacking = false;
+            var target = MakeUnit(50, 0);
+            attacker.AttackTargetId = target.Id;
+            attacker.Path = new List<IsoCoord> { new IsoCoord(5, 0) };
+            attacker.Velocity = new Vector2(50, 0);
+
+            var (mgr, pf, deaths) = Setup();
+            mgr.AddEntity(attacker);
+            mgr.AddEntity(target);
+
+            new CombatSystem().Update(1f / 60f, mgr, pf, e => deaths.Add(e));
+
+            Assert.Null(attacker.Path);
+            Assert.Equal(Vector2.Zero, attacker.Velocity);
+            Assert.True(target.CurrentHP < target.MaxHP);
+        }
+
+        [Fact]
+        public void FireOnMove_DropsAttackWhenTargetLeavesRange()
+        {
+            var attacker = MakeFireOnMoveVehicle(new Vector2(0, 0));
+            var target = MakeUnit(300, 0); // far outside 96 range
+            attacker.AttackTargetId = target.Id;
+            var movePath = new List<IsoCoord> { new IsoCoord(5, 0), new IsoCoord(8, 0) };
+            attacker.Path = movePath;
+
+            var (mgr, pf, deaths) = Setup();
+            mgr.AddEntity(attacker);
+            mgr.AddEntity(target);
+
+            new CombatSystem().Update(1f / 60f, mgr, pf, e => deaths.Add(e));
+
+            // Attack released (no pursuit), movement continues untouched
+            Assert.Null(attacker.AttackTargetId);
+            Assert.False(attacker.MoveWhileAttacking);
+            Assert.Same(movePath, attacker.Path);
+            Assert.Equal(target.MaxHP, target.CurrentHP);
+        }
+
+        [Fact]
+        public void FireOnMove_OutOfRangeWithoutFlag_StillPursues()
+        {
+            // Regression: plain attack orders keep auto-pursuit.
+            var attacker = MakeFireOnMoveVehicle(new Vector2(0, 0));
+            attacker.MoveWhileAttacking = false;
+            var target = MakeUnit(300, 0);
+            attacker.AttackTargetId = target.Id;
+
+            var (mgr, pf, deaths) = Setup();
+            mgr.AddEntity(attacker);
+            mgr.AddEntity(target);
+
+            new CombatSystem().Update(1f / 60f, mgr, pf, e => deaths.Add(e));
+
+            Assert.True(attacker.AttackTargetId.HasValue);
+            Assert.NotNull(attacker.Path); // pursuit path assigned
+        }
+
+        [Fact]
+        public void FireOnMove_DestinationReached_ResumesStopAndFire()
+        {
+            var attacker = MakeFireOnMoveVehicle(new Vector2(0, 0));
+            var target = MakeUnit(50, 0);
+            attacker.AttackTargetId = target.Id;
+            // No path / MoveTarget / velocity — already arrived.
+
+            var (mgr, pf, deaths) = Setup();
+            mgr.AddEntity(attacker);
+            mgr.AddEntity(target);
+
+            new CombatSystem().Update(1f / 60f, mgr, pf, e => deaths.Add(e));
+
+            Assert.False(attacker.MoveWhileAttacking);
+            Assert.Equal(Vector2.Zero, attacker.Velocity);
+            Assert.True(target.CurrentHP < target.MaxHP);
+        }
+
+        [Fact]
+        public void FireOnMove_FlagIgnoredByNonVehicles()
+        {
+            // Infantry with the flag still stops to shoot.
+            var def = new UnitDef { Id = "soldier", MoveSpeed = 50f, HP = 100,
+                AttackDamage = 20, AttackRange = 96f, AttackCooldown = 1.0f, Armor = 0 };
+            var attacker = new Unit(def)
+            {
+                WorldPosition = new Vector2(0, 0),
+                MoveWhileAttacking = true,
+            };
+            var target = MakeUnit(50, 0);
+            attacker.AttackTargetId = target.Id;
+            attacker.Path = new List<IsoCoord> { new IsoCoord(5, 0) };
+
+            var (mgr, pf, deaths) = Setup();
+            mgr.AddEntity(attacker);
+            mgr.AddEntity(target);
+
+            new CombatSystem().Update(1f / 60f, mgr, pf, e => deaths.Add(e));
+
+            Assert.Null(attacker.Path);
+            Assert.Equal(Vector2.Zero, attacker.Velocity);
+        }
     }
 }

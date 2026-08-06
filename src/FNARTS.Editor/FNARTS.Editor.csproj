@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>FNARTS.Editor</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../FNARTS.Core/FNARTS.Core.csproj" />
+    <ProjectReference Include="../FNARTS.Game/FNARTS.Game.csproj" />
+    <ProjectReference Include="../../../FNA/FNA.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\..\data\**\*" CopyToOutputDirectory="PreserveNewest"
+             Link="data\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <!-- Copy FNA3D native library to output directory (create symlinks matching game project) -->
+  <Target Name="CopyFNALibs" AfterTargets="Build">
+    <Exec Command="ln -sf &quot;$(MSBuildProjectDirectory)\..\..\..\FNA\lib\FNA3D\build\libFNA3D.so.27.0.0&quot; &quot;$(TargetDir)libFNA3D.so.0&quot;"
+          Condition="!Exists('$(TargetDir)libFNA3D.so.0')" />
+    <Exec Command="ln -sf &quot;$(MSBuildProjectDirectory)\..\..\..\FNA\lib\FNA3D\build\libFNA3D.so.27.0.0&quot; &quot;$(TargetDir)libFNA3D.so&quot;"
+          Condition="!Exists('$(TargetDir)libFNA3D.so')" />
+  </Target>
+</Project>

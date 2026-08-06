@@ -12,8 +12,8 @@ namespace FNARTS.Game
     /// Implements IAssetProvider so the rendering code needs no changes.
     ///
     /// Expected directory layout:
-    ///   <baseDir>/buildings/<TextureId>.png     (isometric sprites)
-    ///   <baseDir>/units/<unitDefId>.png         (unit sprites, optional)
+    ///   <baseDir>/buildings/textures/<textureId>.png   (pre-rendered isometric sprites)
+    ///   <baseDir>/units/<unitDefId>.png                (unit sprites, optional)
     ///
     /// Falls back to ProceduralAssetProvider for any asset not found on disk.
     /// File-loaded textures are cached; fallback textures are NOT cached so
@@ -42,7 +42,7 @@ namespace FNARTS.Game
 
         /// <summary>
         /// Try to load a building texture from disk, falling back to procedural.
-        /// Looks up: <baseDir>/buildings/<textureId>.png
+        /// Looks up: <baseDir>/buildings/textures/<textureId>.png
         /// </summary>
         public Texture2D GetBuildingTexture(BuildingDef buildingDef)
         {
@@ -54,8 +54,8 @@ namespace FNARTS.Game
             if (_fileTextures.TryGetValue(texId, out var cached))
                 return cached;
 
-            // Try disk
-            string path = Path.Combine(_baseDir, "buildings", $"{texId}.png");
+            // Try disk: <baseDir>/buildings/textures/<texId>.png
+            string path = Path.Combine(_baseDir, "buildings", "textures", $"{texId}.png");
             if (File.Exists(path))
             {
                 try

@@ -30,6 +30,12 @@ namespace FNARTS.Core
         public float AttackRange => Definition.AttackRange;
         public float AttackCooldownTimer { get; set; }
         public uint? AttackTargetId { get; set; }
+        /// <summary>Fire-on-the-move (vehicles only): set when a move order
+        /// arrives while the vehicle is attacking. The vehicle keeps moving
+        /// and firing while the target stays in range, and disengages
+        /// (AttackTargetId cleared, no pursuit) once it leaves range.
+        /// Non-vehicles ignore this flag.</summary>
+        public bool MoveWhileAttacking { get; set; }
         public int Armor => Definition.Armor;
         public int HealAmount => Definition.HealAmount;
         public float HealRange => Definition.HealRange;
@@ -58,6 +64,24 @@ namespace FNARTS.Core
         /// <summary>Whether the wait phase already started for the current
         /// blocker (OpenRA hasWaited).</summary>
         public bool HasWaited { get; set; }
+
+        // ---- 3D vehicle state ----
+        /// <summary>True for units rendered as 3D vehicles (tank, etc.).</summary>
+        public bool IsVehicle { get; set; }
+        /// <summary>Body yaw angle (radians). 0 = East, positive = CCW.</summary>
+        public float BodyRotation { get; set; }
+        /// <summary>Turret yaw angle (radians, absolute). Tracks target when attacking.</summary>
+        public float TurretRotation { get; set; }
+        /// <summary>Turret yaw relative to the body (radians). Idle: eases to 0
+        /// so the turret rides rigidly with the body while turning.</summary>
+        public float TurretOffset { get; set; }
+        /// <summary>3D world position (X=East, Y=North, Z=up).</summary>
+        public Vector3 VehiclePosition3D { get; set; }
+
+        // Turn rates (radians/second). The turret must slew far faster than
+        // the hull so it can keep up with a continuously changing target bearing.
+        private const float BodyTurnRate = 8f;
+        private const float TurretTurnRate = 24f;
 
         // ---- state queries ----
         public bool IsAttacking => AttackTargetId.HasValue;
@@ -181,6 +205,43 @@ namespace FNARTS.Core
                 // Idle: stop immediately
                 Velocity = Vector2.Zero;
             }
+
+            // ── 3D vehicle rotation update ──
+            if (IsVehicle)
+            {
+                // Body rotation: align with movement direction.
+                // VehicleRenderer rotates in grid space (local X=east, Y=north)
+                // before the isometric projection, so the angle must be the
+                // atan2 of the velocity expressed in grid coordinates — not the
+                // raw 2D world-space angle.
+                if (Velocity.LengthSquared() > 1f)
+                {
+                    var gridDir = CoordUtil.WorldToIsoFloat(Velocity);
+                    float targetBody = MathF.Atan2(gridDir.Y, gridDir.X);
+                    BodyRotation = LerpAngle(BodyRotation, targetBody, BodyTurnRate * dt);
+                }
+
+                // Turret control switches mode on attack state:
+                if (AttackTargetId.HasValue)
+                {
+                    // Attacking: the Game layer steers TurretRotation (absolute)
+                    // toward the target bearing every frame. Just mirror the
+                    // current relative offset so idle re-centring resumes
+                    // seamlessly when the target is lost.
+                    TurretOffset = WrapAngle(TurretRotation - BodyRotation);
+                }
+                else
+                {
+                    // Idle: turret is driven by its offset relative to the
+                    // body — body turns carry the turret along rigidly (no
+                    // lag), while the offset eases to 0 and stays there.
+                    TurretOffset = LerpAngle(TurretOffset, 0f, TurretTurnRate * dt);
+                    TurretRotation = BodyRotation + TurretOffset;
+                }
+
+                // Sync 3D position from 2D world position
+                VehiclePosition3D = new Vector3(WorldPosition.X, WorldPosition.Y, 0f);
+            }
         }
 
         /// <summary>
@@ -227,6 +288,7 @@ namespace FNARTS.Core
             Path = null;
             PathIndex = 0;
             AttackTargetId = null;
+            MoveWhileAttacking = false;
             Velocity = Vector2.Zero;
             ForcedMoveSpeed = null;
             IsBlocking = false;
@@ -241,6 +303,36 @@ namespace FNARTS.Core
             StuckTimer = 0f;
             LastStuckCheckPos = WorldPosition;
             StuckRecomputeCount = 0;
+        }
+
+        /// <summary>
+        /// Smoothly interpolate current angle toward target angle,
+        /// handling the -π/π wrap-around.
+        /// </summary>
+        private static float LerpAngle(float current, float target, float speed)
+        {
+            float diff = target - current;
+            return current + WrapToStep(diff, speed);
+        }
+
+        /// <summary>Normalise an angle to the (-π, π] range.</summary>
+        private static float WrapAngle(float angle)
+        {
+            while (angle > MathF.PI) angle -= MathF.PI * 2f;
+            while (angle < -MathF.PI) angle += MathF.PI * 2f;
+            return angle;
+        }
+
+        /// <summary>Clamp an angular difference to a maximum step size.</summary>
+        private static float WrapToStep(float diff, float maxStep)
+        {
+            while (diff > MathF.PI) diff -= MathF.PI * 2f;
+            while (diff < -MathF.PI) diff += MathF.PI * 2f;
+
+            if (MathF.Abs(diff) <= maxStep)
+                return diff;
+
+            return MathF.Sign(diff) * maxStep;
         }
     }
 }
