@@ -64,6 +64,50 @@ namespace FNARTS.Core
         /// <summary>Whether the wait phase already started for the current
         /// blocker (OpenRA hasWaited).</summary>
         public bool HasWaited { get; set; }
+        /// <summary>Sub-cell slot currently occupied (infantry only).
+        /// Vehicles are always FullCell (RA2/OpenRA FromSubCell).</summary>
+        public SubCell SubCell { get; set; } = SubCell.FullCell;
+        /// <summary>Sub-cell slot reserved for ToTile entry (infantry only).
+        /// Equals SubCell while standing (OpenRA ToSubCell).</summary>
+        public SubCell ToSubCell { get; set; } = SubCell.FullCell;
+        /// <summary>Command-time docking assignment (infantry only): the
+        /// tile/slot this unit is walking to. Counts against FreeSubCell
+        /// while in transit but never blocks transit — infantry pass
+        /// through each other. Valid when AssignedSubCell is a slot.</summary>
+        public IsoCoord AssignedTile { get; set; }
+        public SubCell AssignedSubCell { get; set; } = SubCell.FullCell;
+
+        /// <summary>True for infantry: sub-cell occupancy, tile sharing.</summary>
+        public bool IsInfantry => Definition.IsInfantry;
+
+        // ---- infantry placeholder visuals ----
+        /// <summary>Placeholder infantry sprite size (world px): a standing
+        /// humanoid rectangle anchored at bottom-centre — the bottom edge
+        /// sits on the sub-cell slot point (the unit's feet). Must match
+        /// ProceduralAssetProvider's infantry texture; future art sprites
+        /// follow the same bottom-centre anchor convention.</summary>
+        public const float InfantrySpriteW = 16f;
+        public const float InfantrySpriteH = 24f;
+
+        /// <summary>Broad-phase hit box. Infantry sprites stand upward from
+        /// their feet anchor, so the box covers [feet - H, feet]; other
+        /// units keep the centred default.</summary>
+        public override Vector2 HitHalfExtent => IsInfantry
+            ? new Vector2(InfantrySpriteW / 2f, InfantrySpriteH)
+            : base.HitHalfExtent;
+
+        /// <summary>Precise hit test: infantry use their bottom-anchored
+        /// sprite rectangle.</summary>
+        public override bool ContainsPoint(Vector2 worldPoint)
+        {
+            if (!IsInfantry)
+                return base.ContainsPoint(worldPoint);
+            float hw = InfantrySpriteW / 2f;
+            return worldPoint.X >= WorldPosition.X - hw
+                && worldPoint.X <= WorldPosition.X + hw
+                && worldPoint.Y >= WorldPosition.Y - InfantrySpriteH
+                && worldPoint.Y <= WorldPosition.Y;
+        }
 
         // ---- 3D vehicle state ----
         /// <summary>True for units rendered as 3D vehicles (tank, etc.).</summary>
@@ -191,6 +235,7 @@ namespace FNARTS.Core
                 {
                     WorldPosition = dest;
                     FromTile = ToTile;
+                    SubCell = ToSubCell;
                     Velocity = Vector2.Zero;
                 }
                 else
@@ -277,6 +322,7 @@ namespace FNARTS.Core
             // Arrived on ToTile: occupancy of the old tile is released.
             // OpenRA: IsBlocking resets whenever the location changes.
             FromTile = ToTile;
+            SubCell = ToSubCell;
             IsBlocking = false;
             HasWaited = false;
         }
@@ -294,6 +340,7 @@ namespace FNARTS.Core
             IsBlocking = false;
             HasWaited = false;
             WaitTimer = 0f;
+            AssignedSubCell = SubCell.FullCell;
             ResetStuckTracking();
         }
 

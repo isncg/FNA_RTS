@@ -12,5 +12,6 @@
   "visionRange": 6,
   "costCredits": 150,
   "canHitAir": true,
-  "collisionRadius": 14.0
+  "isInfantry": true,
+  "collisionRadius": 8.0
 }

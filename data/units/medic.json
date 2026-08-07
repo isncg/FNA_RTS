@@ -13,5 +13,6 @@
   "costCredits": 200,
   "healAmount": 15,
   "healRange": 96.0,
-  "collisionRadius": 14.0
+  "isInfantry": true,
+  "collisionRadius": 8.0
 }

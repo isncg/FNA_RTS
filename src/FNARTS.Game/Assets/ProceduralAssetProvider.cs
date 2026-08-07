@@ -45,7 +45,7 @@ namespace FNARTS.Game
         public Texture2D GetUnitTexture(string unitDefId)
         {
             if (_unitCache.TryGetValue(unitDefId, out var cached)) return cached;
-            var tex = GenCircleTex(32, unitDefId switch
+            Color color = unitDefId switch
             {
                 "worker"  => new Color(200, 200, 100),   // yellow
                 "soldier" => new Color(100, 180, 255),   // blue
@@ -54,10 +54,25 @@ namespace FNARTS.Game
                 "medic"   => new Color(255, 255, 255),   // white
                 "scout"   => new Color(100, 255, 255),   // cyan
                 _ => Color.Gray
-            });
+            };
+            // Infantry: standing-humanoid rectangle placeholder (drawn
+            // bottom-anchored at the feet); everyone else keeps the circle.
+            var tex = IsInfantryDef(unitDefId)
+                ? GenInfantryTex(color)
+                : GenCircleTex(32, color);
             _unitCache[unitDefId] = tex;
             return tex;
         }
+
+        // Infantry ids — mirrors "isInfantry": true in data/units/*.json
+        // (scout is aircraft, not infantry).
+        private static readonly HashSet<string> InfantryIds = new()
+        {
+            "soldier", "archer", "medic", "worker",
+        };
+
+        private static bool IsInfantryDef(string unitDefId)
+            => InfantryIds.Contains(unitDefId);
 
         public Texture2D GetBuildingTexture(BuildingDef def)
         {
@@ -188,6 +203,28 @@ namespace FNARTS.Game
                         : fill;
             }
             var tex = new Texture2D(_device, size, size);
+            tex.SetData(data);
+            return tex;
+        }
+
+        /// <summary>Standing-humanoid placeholder for infantry: a
+        /// Unit.InfantrySpriteW×H rectangle sized for a future upright
+        /// sprite. EntityRenderer anchors it at bottom-centre so the
+        /// bottom edge sits on the unit's feet (the sub-cell slot point).
+        /// </summary>
+        private Texture2D GenInfantryTex(Color fill)
+        {
+            int w = (int)Unit.InfantrySpriteW, h = (int)Unit.InfantrySpriteH;
+            var data = new Color[w * h];
+            var edge = new Color((byte)(fill.R * 0.6f),
+                (byte)(fill.G * 0.6f), (byte)(fill.B * 0.6f), 255);
+            for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                bool border = x == 0 || y == 0 || x == w - 1 || y == h - 1;
+                data[y * w + x] = border ? edge : fill;
+            }
+            var tex = new Texture2D(_device, w, h);
             tex.SetData(data);
             return tex;
         }

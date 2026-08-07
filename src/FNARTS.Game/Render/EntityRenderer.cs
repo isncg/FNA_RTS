@@ -143,7 +143,13 @@ namespace FNARTS.Game
             };
 
             Vector2 pos = entity.WorldPosition.ToXna();
-            Vector2 origin = new Vector2(tex.Width / 2f, tex.Height / 2f);
+            // Infantry sprites are standing humanoids anchored at
+            // bottom-centre: the texture bottom sits on the sub-cell slot
+            // point (the unit's feet). Everything else is centred.
+            bool bottomAnchored = entity is Unit iu && iu.IsInfantry;
+            Vector2 origin = bottomAnchored
+                ? new Vector2(tex.Width / 2f, tex.Height)
+                : new Vector2(tex.Width / 2f, tex.Height / 2f);
             bool isSelected = selection.SelectedEntityIds.Contains(entity.Id);
 
             // Selection highlight ring — drawn below the entity sprite.

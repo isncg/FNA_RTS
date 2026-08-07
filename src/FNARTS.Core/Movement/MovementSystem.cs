@@ -6,18 +6,19 @@ using FNARTS.Core.Pathfinding;
 namespace FNARTS.Core.Movement
 {
     /// <summary>
-    /// OpenRA-style tile occupancy arbitration (one unit per tile, C&amp;C2
-    /// style). Units reserve their next tile before entering; entry is
-    /// gated by <see cref="Unit.ToTile"/>. When the next tile is occupied:
-    /// <list type="number">
-    /// <item>idle friendly blockers get a Nudge (random adjacent tile),</item>
-    /// <item>busy blockers are flagged <see cref="Unit.IsBlocking"/> so they
-    ///       can step aside when stuck,</item>
-    /// <item>the mover waits a random while, keeps waiting while occupants
-    ///       are evacuating, then repaths (cooldown with jitter on failure).</item>
-    /// </list>
-    /// Mirrors OpenRA's Move.PopPath / Mobile / Nudge / MoveCooldownHelper.
-    /// Aircraft are exempt — they fly over ground occupancy.
+    /// Tile occupancy arbitration. Vehicles keep the C&amp;C2
+    /// one-unit-per-tile rule with full reservation arbitration (reserve
+    /// next tile before entering, wait/nudge/repath ladder when blocked).
+    /// Infantry are free-flowing instead: they never block each other in
+    /// transit and walk through one another. Their destinations are
+    /// sub-cell slot assignments (tile + slot, recorded on
+    /// <see cref="Unit.AssignedTile"/>/<see cref="Unit.AssignedSubCell"/>
+    /// at command time); a slot is only physically claimed when the unit
+    /// reserves the FINAL tile of its path. On an arrival conflict the
+    /// unit takes another free slot on the same tile, or spills to the
+    /// nearest tile with a free slot. Vehicles and buildings still block
+    /// infantry; docked infantry still block vehicles. Aircraft are
+    /// exempt — they fly over ground occupancy.
     /// </summary>
     public class MovementSystem
     {
@@ -82,8 +83,12 @@ namespace FNARTS.Core.Movement
 
         /// <summary>
         /// Whether a unit may enter a tile: terrain passable, no building
-        /// footprint, and no other unit occupies or has reserved it.
-        /// Melee exception: the tile of one's own attack target is allowed.
+        /// footprint, and class-aware occupancy. Infantry pass freely
+        /// through other infantry (docking is resolved by slot
+        /// assignment, not by blocking); vehicles and buildings still
+        /// block them. Vehicles are blocked by ANY occupant (one unit
+        /// per tile). Melee exception: the tile of one's own attack
+        /// target is allowed.
         /// </summary>
         public bool CanEnterTile(Unit unit, IsoCoord tile)
         {
@@ -97,12 +102,23 @@ namespace FNARTS.Core.Movement
                 foreach (var other in occupants)
                 {
                     if (other == unit) continue;
+                    // Infantry never block each other — large groups flow
+                    // freely; slot conflicts are resolved at docking time.
+                    if (unit.IsInfantry && other.IsInfantry) continue;
                     if (other.Id == unit.AttackTargetId) continue;
                     return false;
                 }
             }
             return true;
         }
+
+        /// <summary>
+        /// Command-layer query: the sub-cell slot a unit would claim on a
+        /// tile right now. Returns <see cref="SubCell.FullCell"/> when the
+        /// tile cannot host the unit (vehicle present / all slots taken).
+        /// </summary>
+        public SubCell FreeSubCellFor(Unit unit, IsoCoord tile)
+            => FreeSubCell(tile, SubCellInfo.First, null);
 
         // ── internals ─────────────────────────────────────────────────
 
@@ -129,13 +145,35 @@ namespace FNARTS.Core.Movement
 
         /// <summary>Initialise tiles from position on first sight; while
         /// standing, keep them in sync (self-heals spawns/teleports).</summary>
-        private static void SyncTiles(Unit unit)
+        private void SyncTiles(Unit unit)
         {
             if (!unit.TilesInitialized)
             {
-                unit.FromTile = unit.ToTile =
-                    CoordUtil.WorldToIso(unit.WorldPosition);
+                var tile = CoordUtil.WorldToIso(unit.WorldPosition);
+                unit.FromTile = unit.ToTile = tile;
+                if (unit.IsInfantry)
+                {
+                    // Fresh spawn / teleport: prefer the slot the actual
+                    // position sits on (scenario spawns pre-place units
+                    // at slot points), but never shadow an existing claim
+                    // — e.g. a centre spawn must not grab a vertex slot
+                    // another unit already holds. Full tile: keep the
+                    // position-derived slot anyway (resolves on the next
+                    // move).
+                    var atPoint = SlotAtWorld(tile, unit.WorldPosition);
+                    var preferred = SubCellInfo.IsInfantrySlot(atPoint)
+                        ? atPoint : SubCellInfo.First;
+                    var sub = FreeSubCell(tile, preferred, unit);
+                    if (!SubCellInfo.IsInfantrySlot(sub))
+                        sub = preferred;
+                    unit.SubCell = unit.ToSubCell = sub;
+                }
                 unit.TilesInitialized = true;
+                // Register immediately so other units initialised later in
+                // this same pass (same-tile spawns) already see us and
+                // claim a different slot. RebuildOccupancy re-syncs the
+                // map right after this pass.
+                AddOccupant(unit, tile);
                 return;
             }
 
@@ -184,20 +222,151 @@ namespace FNARTS.Core.Movement
 
             if (CanEnterTile(unit, nextTile))
             {
-                Reserve(unit, nextTile);
+                Reserve(unit, nextTile,
+                    unit.PathIndex == unit.Path.Count - 1);
                 return;
             }
 
             HandleBlocked(unit, nextTile);
         }
 
-        private void Reserve(Unit unit, IsoCoord tile)
+        private void Reserve(Unit unit, IsoCoord tile, bool isFinal)
         {
             unit.ToTile = tile;
             unit.HasWaited = false;
+
+            if (unit.IsInfantry)
+            {
+                if (isFinal)
+                {
+                    // Docking reservation: claim a slot, preferring the
+                    // command-time assignment. Same-frame earlier
+                    // reservations are visible via ToTile/ToSubCell, so
+                    // two units can never claim the same slot here.
+                    var preferred = unit.AssignedTile == tile
+                        && SubCellInfo.IsInfantrySlot(unit.AssignedSubCell)
+                        ? unit.AssignedSubCell : unit.SubCell;
+                    var sub = FreeSubCell(tile, preferred, unit);
+                    if (SubCellInfo.IsInfantrySlot(sub))
+                    {
+                        unit.ToSubCell = sub;
+                        unit.AssignedTile = tile;
+                        unit.AssignedSubCell = sub;
+                        if (unit.MoveTarget.HasValue
+                            && CoordUtil.WorldToIso(unit.MoveTarget.Value)
+                                == tile)
+                            unit.MoveTarget =
+                                SubCellInfo.ToWorld(tile, sub);
+                    }
+                    else
+                    {
+                        // Arrival conflict: the tile filled up in transit
+                        // (e.g. a vehicle parked on it). Walk in on a
+                        // temporary centre dock and spill to the nearest
+                        // tile with a free slot — resolved after arrival
+                        // when Arbitrate repaths to the new MoveTarget.
+                        unit.ToSubCell = SubCell.Center; // transient dock marker (not a slot)
+                        var spill = FindSpillTile(unit, tile);
+                        if (spill.HasValue)
+                        {
+                            var s2 = FreeSubCell(spill.Value,
+                                SubCellInfo.First, unit);
+                            if (!SubCellInfo.IsInfantrySlot(s2))
+                                s2 = SubCellInfo.First;
+                            unit.MoveTarget =
+                                SubCellInfo.ToWorld(spill.Value, s2);
+                            unit.AssignedTile = spill.Value;
+                            unit.AssignedSubCell = s2;
+                        }
+                    }
+                }
+                else
+                {
+                    // Transit: infantry reserve no slots mid-path — they
+                    // flow through each other. Carry the current slot so
+                    // waypoint arrival keeps SubCell valid.
+                    unit.ToSubCell = unit.SubCell;
+                }
+            }
+            else
+            {
+                unit.ToSubCell = SubCell.FullCell;
+            }
+
             // Live update: the occupancy map is rebuilt every frame, but
             // later units in this frame must already see the reservation.
             AddOccupant(unit, tile);
+        }
+
+        /// <summary>
+        /// First free sub-cell slot on a tile in fixed slot order
+        /// (deterministic). The preferred slot wins when free. Counts
+        /// every claim on the tile: docked infantry by their slot,
+        /// arriving infantry by their final-reservation slot, in-transit
+        /// infantry by their command-time assignment, and vehicles
+        /// (docked or reserved) make the whole tile unavailable.
+        /// <paramref name="ignore"/> is exempt from its own claims —
+        /// reservation-time queries pass the mover so its freshly written
+        /// ToTile/ToSubCell cannot shadow itself; command-layer queries
+        /// pass null so a unit's own slot is never double-assigned.
+        /// </summary>
+        private SubCell FreeSubCell(IsoCoord tile, SubCell preferred,
+            Unit ignore)
+        {
+            // Index by (int)SubCell directly; index 0 (Center) is never
+            // marked — it is not an infantry slot.
+            Span<bool> taken = stackalloc bool[
+                (int)SubCellInfo.First + SubCellInfo.Count];
+            foreach (var e in _entities.AllEntities)
+            {
+                if (e is not Unit u || !u.IsAlive || !u.TilesInitialized
+                    || u.IsAircraft || u == ignore)
+                    continue;
+
+                if (!u.IsInfantry)
+                {
+                    // Vehicles occupy the whole tile — docked or reserved.
+                    if (u.FromTile == tile || u.ToTile == tile)
+                        return SubCell.FullCell;
+                    continue;
+                }
+
+                SubCell s;
+                if (u.FromTile == tile)
+                    s = u.SubCell;                  // docked / leaving
+                else if (u.ToTile == tile)
+                    s = u.ToSubCell;                // final reservation
+                else if (u.AssignedTile == tile
+                    && SubCellInfo.IsInfantrySlot(u.AssignedSubCell))
+                    s = u.AssignedSubCell;          // command assignment
+                else
+                    continue;
+
+                if (SubCellInfo.IsInfantrySlot(s))
+                    taken[(int)s] = true;
+            }
+
+            if (SubCellInfo.IsInfantrySlot(preferred) && !taken[(int)preferred])
+                return preferred;
+            for (int i = 0; i < SubCellInfo.Count; i++)
+                if (!taken[(int)SubCellInfo.First + i])
+                    return SubCellInfo.First + i;
+            return SubCell.FullCell;
+        }
+
+        /// <summary>
+        /// Which slot point of a tile a world position sits on exactly;
+        /// <see cref="SubCell.FullCell"/> when it matches none.
+        /// </summary>
+        private static SubCell SlotAtWorld(IsoCoord tile, Vector2 world)
+        {
+            for (int i = 0; i < SubCellInfo.Count; i++)
+            {
+                var slot = SubCellInfo.First + i;
+                if (SubCellInfo.ToWorld(tile, slot) == world)
+                    return slot;
+            }
+            return SubCell.FullCell;
         }
 
         /// <summary>OpenRA PopPath decision ladder for a blocked tile.</summary>
@@ -212,6 +381,9 @@ namespace FNARTS.Core.Movement
 
             // Notify the blockers (OpenRA NotifyBlocker): idle friendlies
             // step aside now; busy ones get flagged to yield when stuck.
+            // (Infantry-vs-infantry blocks no longer occur — infantry
+            // pass through each other — so this only fires for vehicle
+            // and building blockers now.)
             foreach (var blocker in GetUnitsAt(nextTile))
             {
                 if (blocker == unit || blocker.Faction != unit.Faction)
@@ -293,13 +465,46 @@ namespace FNARTS.Core.Movement
                     ? unit.Path[unit.Path.Count - 1]
                     : unit.FromTile;
 
+            // Infantry overflow: every slot on the destination tile is
+            // taken — redirect to the nearest enterable tile with a free
+            // slot (RA2-style spill; docked infantry are never evicted).
+            if (unit.IsInfantry && unit.MoveTarget.HasValue
+                && !SubCellInfo.IsInfantrySlot(
+                    FreeSubCell(destTile, SubCellInfo.First, unit)))
+            {
+                var spill = FindSpillTile(unit, destTile);
+                if (spill.HasValue)
+                {
+                    var slot = FreeSubCell(spill.Value, SubCellInfo.First, unit);
+                    if (!SubCellInfo.IsInfantrySlot(slot))
+                        slot = SubCellInfo.First;
+                    unit.MoveTarget = SubCellInfo.ToWorld(spill.Value, slot);
+                    destTile = spill.Value;
+                }
+            }
+
             var start = unit.FromTile;
             if (start == destTile)
             {
                 // Already on the destination tile — snap and finish.
                 unit.Path = null;
                 unit.PathIndex = 0;
-                unit.MoveTarget = CoordUtil.IsoToWorldCenter(destTile);
+                if (unit.IsInfantry)
+                {
+                    // Infantry dock at their slot point, not the centre.
+                    var sub = SubCellInfo.IsInfantrySlot(unit.SubCell)
+                        ? unit.SubCell
+                        : FreeSubCell(destTile, SubCellInfo.First, unit);
+                    if (!SubCellInfo.IsInfantrySlot(sub))
+                        sub = SubCellInfo.First;
+                    unit.MoveTarget = SubCellInfo.ToWorld(destTile, sub);
+                    unit.AssignedTile = destTile;
+                    unit.AssignedSubCell = sub;
+                }
+                else
+                {
+                    unit.MoveTarget = CoordUtil.IsoToWorldCenter(destTile);
+                }
                 unit.HasWaited = false;
                 return;
             }
@@ -332,6 +537,38 @@ namespace FNARTS.Core.Movement
 
             unit.WaitTimer = COOLDOWN_MIN
                 + (float)_random.NextDouble() * (COOLDOWN_MAX - COOLDOWN_MIN);
+        }
+
+        /// <summary>
+        /// Nearest tile with a free sub-cell slot for an infantry mover,
+        /// searching expanding rings (1..5) around a fully-booked tile.
+        /// Returns null when no enterable, reachable tile has room.
+        /// </summary>
+        private IsoCoord? FindSpillTile(Unit unit, IsoCoord around)
+        {
+            for (int ring = 1; ring <= 5; ring++)
+            {
+                for (int dx = -ring; dx <= ring; dx++)
+                for (int dy = -ring; dy <= ring; dy++)
+                {
+                    if (Math.Abs(dx) < ring && Math.Abs(dy) < ring)
+                        continue; // inner ring, already checked
+
+                    var tile = new IsoCoord(around.X + dx, around.Y + dy);
+                    if (tile == unit.FromTile)
+                        continue; // never spill onto our own tile
+                    if (!CanEnterTile(unit, tile))
+                        continue;
+                    if (!SubCellInfo.IsInfantrySlot(
+                        FreeSubCell(tile, SubCellInfo.First, unit)))
+                        continue; // enterable but no free docking slot
+                    if (tile != unit.FromTile
+                        && _pathfinder.FindPath(unit.FromTile, tile).Count == 0)
+                        continue;
+                    return tile;
+                }
+            }
+            return null;
         }
 
         /// <summary>

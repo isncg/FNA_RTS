@@ -41,9 +41,19 @@ namespace FNARTS.Game
                     if (u.CurrentHP >= u.MaxHP) continue;
                     cur = u.CurrentHP;
                     max = u.MaxHP;
-                    // Unit sprite is 32×32, origin at centre → top edge at
-                    // screenPos.Y - 16*zoom.  Place bar 6 px above that.
-                    screenOffsetY = 16f * camera.Zoom + 8f;
+                    if (u.IsInfantry)
+                    {
+                        // Infantry sprite stands upward from its feet
+                        // anchor → top edge at screenPos.Y - H*zoom.
+                        screenOffsetY =
+                            FNARTS.Core.Unit.InfantrySpriteH * camera.Zoom + 8f;
+                    }
+                    else
+                    {
+                        // Unit sprite is 32×32, origin at centre → top edge
+                        // at screenPos.Y - 16*zoom. Place bar 6 px above.
+                        screenOffsetY = 16f * camera.Zoom + 8f;
+                    }
                 }
                 else if (e is Building b)
                 {

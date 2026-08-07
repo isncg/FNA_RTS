@@ -300,7 +300,6 @@ namespace FNARTS.Game
             }
 
             // Vehicle display test: a single tank (faction 0), rendered as 3D.
-            // Non-vehicle units (workers/soldiers) are temporarily disabled.
             var tankDef = _config.GetUnit("tank");
             var playerTank = new Unit(tankDef)
             {
@@ -308,6 +307,32 @@ namespace FNARTS.Game
                 IsVehicle = true
             };
             _entities.AddEntity(playerTank);
+
+            // Infantry display: 20 soldiers near the player tank, spread
+            // over 5 tiles × 4 sub-cell slots. Each claims its slot up
+            // front, mirroring OnUnitSpawned.
+            var soldierDef = _config.GetUnit("soldier");
+            var infantryTiles = new[]
+            {
+                new IsoCoord(S + 5, S + 3), new IsoCoord(S + 6, S + 3),
+                new IsoCoord(S + 7, S + 3), new IsoCoord(S + 5, S + 4),
+                new IsoCoord(S + 6, S + 4),
+            };
+            for (int i = 0; i < 20; i++)
+            {
+                var tile = infantryTiles[i / SubCellInfo.Count];
+                var slot = SubCellInfo.First + i % SubCellInfo.Count;
+                var inf = new Unit(soldierDef)
+                {
+                    WorldPosition = SubCellInfo.ToWorld(tile, slot),
+                    FromTile = tile,
+                    ToTile = tile,
+                    SubCell = slot,
+                    ToSubCell = slot,
+                    TilesInitialized = true,
+                };
+                _entities.AddEntity(inf);
+            }
 
             // Enemy building (faction 1) as a static target for turret tracking
             var enemyBldDef = new BuildingDef
@@ -337,7 +362,7 @@ namespace FNARTS.Game
             playerTank.AttackTargetId = enemyTank.Id;
 
             GameLogger.Info($"Created {_entities.AllEntities.Count} entities " +
-                $"({specs.Length + 1} buildings, 2 vehicles)");
+                $"({specs.Length + 1} buildings, 2 vehicles, 20 infantry)");
         }
 
         protected override void LoadContent()
@@ -932,20 +957,37 @@ namespace FNARTS.Game
         {
             if (!_config.UnitDefs.TryGetValue(unitDefId, out var ud)) return;
 
-            var spawnTile = FindFreeAdjacentTile(building);
+            var spawnTile = FindFreeAdjacentTile(building, ud);
             if (spawnTile == null) return;
 
             var unit = new Unit(ud);
-            unit.WorldPosition = CoordUtil.IsoToWorldCenter(spawnTile.Value);
+            if (ud.IsInfantry)
+            {
+                // Infantry spawn on a sub-cell slot point (RA2-style) and
+                // claim it immediately, so consecutive spawns can share
+                // tiles around the producer without arbitration races.
+                var sub = _movement.FreeSubCellFor(null, spawnTile.Value);
+                if (!SubCellInfo.IsInfantrySlot(sub))
+                    sub = SubCellInfo.First;
+                unit.WorldPosition = SubCellInfo.ToWorld(spawnTile.Value, sub);
+                unit.FromTile = unit.ToTile = spawnTile.Value;
+                unit.SubCell = unit.ToSubCell = sub;
+                unit.TilesInitialized = true;
+            }
+            else
+            {
+                unit.WorldPosition = CoordUtil.IsoToWorldCenter(spawnTile.Value);
+            }
             _entities.AddEntity(unit);
             GameLogger.Info($"Unit spawned: {ud.Name} from {building.Definition.Name}");
         }
 
         /// <summary>
         /// Search expanding rings around a building for a free, passable 1x1 tile.
-        /// Returns null if no free tile found within a reasonable radius.
+        /// Infantry also accept tiles shared with other infantry as long as a
+        /// sub-cell slot is free. Returns null if nothing found within range.
         /// </summary>
-        private IsoCoord? FindFreeAdjacentTile(Building building)
+        private IsoCoord? FindFreeAdjacentTile(Building building, UnitDef ud)
         {
             int bx = building.PlacementOrigin.X;
             int by = building.PlacementOrigin.Y;
@@ -957,24 +999,29 @@ namespace FNARTS.Game
                 // Top and bottom edges of the ring
                 for (int dx = -ring; dx <= sx - 1 + ring; dx++)
                 {
-                    if (TrySpawnTile(bx + dx, by - ring)) return new IsoCoord(bx + dx, by - ring);
-                    if (TrySpawnTile(bx + dx, by + sy - 1 + ring)) return new IsoCoord(bx + dx, by + sy - 1 + ring);
+                    if (TrySpawnTile(bx + dx, by - ring, ud)) return new IsoCoord(bx + dx, by - ring);
+                    if (TrySpawnTile(bx + dx, by + sy - 1 + ring, ud)) return new IsoCoord(bx + dx, by + sy - 1 + ring);
                 }
                 // Left and right edges (skip corners already checked)
                 for (int dy = -ring + 1; dy <= sy - 1 + ring - 1; dy++)
                 {
-                    if (TrySpawnTile(bx - ring, by + dy)) return new IsoCoord(bx - ring, by + dy);
-                    if (TrySpawnTile(bx + sx - 1 + ring, by + dy)) return new IsoCoord(bx + sx - 1 + ring, by + dy);
+                    if (TrySpawnTile(bx - ring, by + dy, ud)) return new IsoCoord(bx - ring, by + dy);
+                    if (TrySpawnTile(bx + sx - 1 + ring, by + dy, ud)) return new IsoCoord(bx + sx - 1 + ring, by + dy);
                 }
             }
             return null;
         }
 
-        private bool TrySpawnTile(int gx, int gy)
+        private bool TrySpawnTile(int gx, int gy, UnitDef ud)
         {
+            var tile = new IsoCoord(gx, gy);
             if (!_map.InBounds(gx, gy)) return false;
-            if (!_map.IsPassable(new IsoCoord(gx, gy))) return false;
-            return _entities.IsAreaFree(new IsoCoord(gx, gy), 1, 1);
+            if (!_map.IsPassable(tile)) return false;
+            if (!_entities.IsAreaFree(tile, 1, 1)) return false;
+            if (!ud.IsInfantry) return true;
+            // Infantry: a vehicle on the tile or fully-booked slots still
+            // block; tiles shared with other infantry are fine.
+            return SubCellInfo.IsInfantrySlot(_movement.FreeSubCellFor(null, tile));
         }
 
         /// <summary>
@@ -1012,10 +1059,13 @@ namespace FNARTS.Game
             {
                 // ── Formation movement is OFF by default (RA1
                 //     FormMove=false semantics): every unit gets the
-                //     SAME target tile and pathfinds to it independently;
-                //     MovementSystem arbitration spreads them onto free
-                //     tiles around it. GroupMovement stays dormant until
-                //     Ctrl+groups + formation toggle are implemented. ──
+                //     SAME target tile and pathfinds to it independently.
+                //     Vehicles: MovementSystem arbitration spreads them
+                //     onto free tiles. Infantry: free-flowing (no mutual
+                //     blocking); command-time slot assignment spreads
+                //     them compactly over the target tile + rings (5 per
+                //     tile). GroupMovement stays dormant until Ctrl+groups
+                //     + formation toggle are implemented. ──
                 var targetTile = CoordUtil.WorldToIso(targetPos);
                 foreach (var unit in selectedUnits)
                 {
@@ -1121,6 +1171,16 @@ namespace FNARTS.Game
         private void AssignUnitPath(Unit unit, IsoCoord targetTile)
         {
             var start = CoordUtil.WorldToIso(unit.WorldPosition);
+
+            // Infantry (RA2-style): dock at a free sub-cell slot instead of
+            // the tile centre; spill to nearby tiles when all slots on the
+            // target tile are taken.
+            if (unit.IsInfantry)
+            {
+                AssignInfantryPath(unit, start, targetTile);
+                return;
+            }
+
             var path = TryFindPath(start, targetTile);
 
             if (path != null)
@@ -1165,6 +1225,96 @@ namespace FNARTS.Game
             // Completely boxed in — don't move.
         }
 
+        /// <summary>
+        /// Infantry move order (RA2-style, free-flowing): the destination
+        /// is a free sub-cell slot on the target tile; when every slot
+        /// there is taken, search expanding rings (up to 5) for a
+        /// reachable tile with a free slot. The (tile, slot) assignment
+        /// is recorded on the unit so later units in the same batch see
+        /// it — compact fill of 4 slots per tile. MovementSystem.Reserve
+        /// re-checks the slot at arrival; conflicts fall back to another
+        /// free slot on the tile or spill to a nearby tile.
+        /// </summary>
+        private void AssignInfantryPath(Unit unit, IsoCoord start,
+            IsoCoord targetTile)
+        {
+            var dest = FindInfantryDestination(unit, start, targetTile);
+            if (dest == null)
+                return; // completely boxed in — don't move
+
+            var (destTile, path) = dest.Value;
+            var sub = _movement.FreeSubCellFor(unit, destTile);
+            if (!SubCellInfo.IsInfantrySlot(sub))
+                sub = SubCellInfo.First;
+            unit.AssignedTile = destTile;
+            unit.AssignedSubCell = sub;
+            unit.MoveTarget = SubCellInfo.ToWorld(destTile, sub);
+            unit.Path = path;
+            unit.PathIndex = 0;
+            unit.ResetStuckTracking();
+
+            // Reordering within the tile we already stand on: commit the
+            // slot immediately (no reservation happens without a path).
+            if (path == null)
+            {
+                unit.SubCell = unit.ToSubCell = sub;
+            }
+        }
+
+        /// <summary>
+        /// Find a reachable tile with a free sub-cell slot for an infantry
+        /// unit: targetTile first, then expanding rings 1..5.
+        /// Returns (tile, path); path is null when start == tile.
+        /// </summary>
+        private (IsoCoord, List<IsoCoord>)? FindInfantryDestination(
+            Unit unit, IsoCoord start, IsoCoord targetTile)
+        {
+            if (_movement.FreeSubCellFor(unit, targetTile) != SubCell.FullCell)
+            {
+                if (start == targetTile)
+                    return (targetTile, null);
+                var path = TryFindPath(start, targetTile);
+                if (path != null)
+                    return (targetTile, path);
+            }
+
+            for (int ring = 1; ring <= 5; ring++)
+            {
+                for (int dx = -ring; dx <= ring; dx++)
+                for (int dy = -ring; dy <= ring; dy++)
+                {
+                    if (Math.Abs(dx) < ring && Math.Abs(dy) < ring)
+                        continue; // inner ring, already checked
+
+                    var tile = new IsoCoord(targetTile.X + dx, targetTile.Y + dy);
+                    if (_movement.FreeSubCellFor(unit, tile) == SubCell.FullCell)
+                        continue;
+                    if (start == tile)
+                        return (tile, null);
+                    var path = TryFindPath(start, tile);
+                    if (path != null)
+                        return (tile, path);
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Docking point for a unit on a tile: the tile centre for
+        /// vehicles, a free sub-cell slot point for infantry (RA2-style).
+        /// </summary>
+        private System.Numerics.Vector2 DestinationFor(Unit unit, IsoCoord tile)
+        {
+            if (!unit.IsInfantry)
+                return CoordUtil.IsoToWorldCenter(tile);
+            var sub = _movement.FreeSubCellFor(unit, tile);
+            if (!SubCellInfo.IsInfantrySlot(sub))
+                sub = SubCell.Center;
+            unit.AssignedTile = tile;
+            unit.AssignedSubCell = sub;
+            return SubCellInfo.ToWorld(tile, sub);
+        }
+
         /// <summary>Try to find a path. Returns null if unreachable.</summary>
         private System.Collections.Generic.List<IsoCoord> TryFindPath(
             IsoCoord start, IsoCoord end)
@@ -1193,7 +1343,9 @@ namespace FNARTS.Game
 
             if (start == targetTile)
             {
-                unit.MoveTarget = CoordUtil.IsoToWorldCenter(targetTile);
+                unit.MoveTarget = DestinationFor(unit, targetTile);
+                if (unit.IsInfantry && unit.Path == null)
+                    unit.SubCell = unit.ToSubCell = unit.AssignedSubCell;
                 return;
             }
 
@@ -1220,7 +1372,7 @@ namespace FNARTS.Game
                     var fp = TryFindPath(start, ft);
                     if (fp != null)
                     {
-                        unit.MoveTarget = CoordUtil.IsoToWorldCenter(ft);
+                        unit.MoveTarget = DestinationFor(unit, ft);
                         unit.Path = fp;
                         unit.PathIndex = 0;
                         unit.LastStuckCheckPos = unit.WorldPosition;

@@ -26,6 +26,11 @@ namespace FNARTS.Core
         public bool IsAircraft { get; set; } = false;
         public bool CanHitAir { get; set; } = false;
 
+        /// <summary>True = infantry: occupies a sub-cell slot and can share
+        /// a tile with other infantry (up to SubCellInfo.Count per tile).
+        /// False = vehicle semantics: exclusive whole-tile occupancy.</summary>
+        public bool IsInfantry { get; set; } = false;
+
         // Phase 3 SC1-style steering parameters
         public float Acceleration { get; set; } = 400f;       // px/s^2
         public float Deceleration { get; set; } = 300f;       // px/s^2

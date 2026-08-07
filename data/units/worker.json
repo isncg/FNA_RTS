@@ -11,5 +11,6 @@
   "armor": 0,
   "visionRange": 4,
   "costCredits": 50,
-  "collisionRadius": 14.0
+  "isInfantry": true,
+  "collisionRadius": 8.0
 }
